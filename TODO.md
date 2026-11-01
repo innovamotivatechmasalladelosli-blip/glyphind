@@ -23,4 +23,4 @@
 - [x] Los cambios del proyecto se guardan de forma explícita y automática en el almacenamiento local.
 
 ## Verificación de entrega
-- [ ] Conectar el repositorio canónico de GitHub cuando el usuario proporcione o autorice la cuenta/repositorio de destino.
+- [x] Conectar el repositorio canónico de GitHub cuando el usuario proporcione o autorice la cuenta/repositorio de destino.
