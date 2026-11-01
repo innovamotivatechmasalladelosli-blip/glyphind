@@ -199,6 +199,27 @@ function createProject(name: string, type: string): Project {
   };
 }
 
+function downloadProject(project: Project) {
+  const type = typeFor(project.type);
+  const body = [
+    `# ${project.name}`,
+    `Tipo: ${type.label}`,
+    '',
+    ...project.nodes.map((node, index) => `${index + 1}. **${node.label}** — ${node.detail}`),
+    '',
+    `Exportado desde Glyphind · ${new Date().toLocaleString('es-MX')}`,
+  ].join('\n');
+  const blob = new Blob([body], { type: 'text/markdown;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `${project.name.toLowerCase().replace(/[^a-z0-9áéíóúñ]+/gi, '-').replace(/^-|-$/g, '') || 'glyphind-proyecto'}.md`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 function App() {
   const [projects, setProjects] = useState<Project[]>(() => {
     try {
@@ -416,6 +437,7 @@ function ProjectModal({ mode, name, type, setName, setType, onSubmit, onClose }:
 function Editor({ project, onBack, onChange, onToast }: { project: Project; onBack: () => void; onChange: (project: Project) => void; onToast: (message: string) => void }) {
   const [selectedNodeId, setSelectedNodeId] = useState(project.nodes[0]?.id ?? '');
   const [inspectorOpen, setInspectorOpen] = useState(true);
+  const [zoom, setZoom] = useState(100);
   const type = typeFor(project.type);
   const selectedNode = project.nodes.find((node) => node.id === selectedNodeId) ?? project.nodes[0];
 
@@ -439,10 +461,29 @@ function Editor({ project, onBack, onChange, onToast }: { project: Project; onBa
     onToast('Elemento eliminado');
   };
 
+  const fitCanvas = () => {
+    const columns = Math.min(4, Math.max(2, Math.ceil(Math.sqrt(project.nodes.length))));
+    const rows = Math.ceil(project.nodes.length / columns);
+    const nextNodes = project.nodes.map((node, index) => ({
+      ...node,
+      x: 12 + (index % columns) * (76 / Math.max(1, columns - 1)),
+      y: 18 + Math.floor(index / columns) * (64 / Math.max(1, rows - 1)),
+    }));
+    onChange({ ...project, nodes: nextNodes });
+    setZoom(100);
+    onToast('Lienzo ajustado al flujo');
+  };
+
+  const cycleZoom = () => {
+    const nextZoom = zoom >= 150 ? 75 : zoom + 25;
+    setZoom(nextZoom);
+    onToast(`Zoom ${nextZoom}%`);
+  };
+
   return (
     <div className="editor-shell">
       <header className="editor-topbar"><button className="back-link" onClick={onBack}><Icon name="back" size={17} /> Volver a proyectos</button><div className="editor-breadcrumb"><span>/</span><span>{project.name}</span><span className="editor-type-pill" style={{ color: type.color, backgroundColor: type.soft }}><Icon name={type.icon} size={13} /> {type.label}</span></div><div className="editor-actions"><span className="saved-label"><span className="canvas-live-dot" /> Cambios activos</span><button className="icon-button" title="Compartir (próximamente)" disabled><Icon name="share" size={17} /></button></div></header>
-      <main className="editor-main"><div className="editor-heading"><div><span className="section-kicker">Editor de diagrama</span><h1>{project.name}</h1><p>{type.description}. Cambia, elimina o añade elementos para construir tu flujo.</p></div><button className="secondary-button" onClick={() => onToast('La exportación estará disponible pronto')}><Icon name="arrow" size={15} /> Exportar</button></div><div className={`editor-workspace ${inspectorOpen ? '' : 'inspector-is-closed'}`}><aside className="canvas-tools"><span className="tool-label">Herramientas</span><button className="tool-button is-active" title="Seleccionar"><Icon name="command" /></button><button className="tool-button" title="Añadir elemento" onClick={addNode}><Icon name="add" /></button><div className="tools-line" /><span className="tool-label">Vista</span><button className="tool-button" title="Ajustar lienzo"><Icon name="grid" /></button><span className="zoom-value">100%</span></aside><section className="canvas-section"><div className="canvas-header"><span><span className="canvas-live-dot" /> Lienzo de trabajo</span><span className="canvas-help">Selecciona un elemento para editarlo</span>{!inspectorOpen && <button className="reopen-inspector" onClick={() => setInspectorOpen(true)}>Mostrar inspector <Icon name="arrow" size={13} /></button>}</div><div className="diagram-canvas" onClick={() => setSelectedNodeId('')}><svg className="canvas-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path d="M22 48 C30 48, 30 35, 39 35 M55 36 C64 36, 64 50, 68 50 M77 59 C81 63, 82 66, 83 72" /></svg>{project.nodes.map((node) => <button key={node.id} className={`diagram-node node-${node.tone} ${selectedNode?.id === node.id ? 'is-selected' : ''}`} style={{ left: `${node.x}%`, top: `${node.y}%` }} onClick={(event) => { event.stopPropagation(); setSelectedNodeId(node.id); }}><span className="node-grip"><i /><i /><i /></span><strong>{node.label}</strong><small>{node.detail}</small></button>)}</div><div className="canvas-footer"><span>{project.nodes.length} elementos</span><span><kbd>⌘</kbd> + <kbd>K</kbd> para comandos</span></div></section>{inspectorOpen && <aside className="properties-panel"><div className="properties-head"><div><span className="section-kicker">Inspector</span><h2>Propiedades</h2></div><button className="icon-button" aria-label="Cerrar inspector" onClick={() => setInspectorOpen(false)}><Icon name="close" size={16} /></button></div>{selectedNode ? <div className="properties-content"><div className="selected-preview" style={{ backgroundColor: type.soft, color: type.color }}><Icon name={type.icon} size={21} /><span>{type.label}</span></div><label className="field-label">Título<input value={selectedNode.label} onChange={(event) => updateNode({ label: event.target.value })} /></label><label className="field-label">Descripción<textarea value={selectedNode.detail} onChange={(event) => updateNode({ detail: event.target.value })} rows={4} /></label><div className="property-meta"><span>ID del elemento</span><code>{selectedNode.id.slice(0, 12)}</code></div><button className="delete-element" onClick={deleteNode} disabled={project.nodes.length <= 1}><Icon name="trash" size={15} /> Eliminar elemento</button></div> : <div className="properties-empty"><span><Icon name="command" size={23} /></span><p>Selecciona un elemento del lienzo para editar sus propiedades.</p></div>}<button className="add-element-button" onClick={addNode}><Icon name="plus" size={15} /> Añadir elemento</button></aside>}</div></main>
+      <main className="editor-main"><div className="editor-heading"><div><span className="section-kicker">Editor de diagrama</span><h1>{project.name}</h1><p>{type.description}. Cambia, elimina o añade elementos para construir tu flujo.</p></div><button className="secondary-button" onClick={() => { downloadProject(project); onToast('Flujo exportado como Markdown'); }}><Icon name="arrow" size={15} /> Exportar</button></div><div className={`editor-workspace ${inspectorOpen ? '' : 'inspector-is-closed'}`}><aside className="canvas-tools"><span className="tool-label">Herramientas</span><button className="tool-button is-active" title="Seleccionar"><Icon name="command" /></button><button className="tool-button" title="Añadir elemento" onClick={addNode}><Icon name="add" /></button><div className="tools-line" /><span className="tool-label">Vista</span><button className="tool-button" title="Ajustar lienzo" onClick={fitCanvas}><Icon name="grid" /></button><button className="zoom-value zoom-button" title="Cambiar zoom" onClick={cycleZoom}>{zoom}%</button></aside><section className="canvas-section"><div className="canvas-header"><span><span className="canvas-live-dot" /> Lienzo de trabajo</span><span className="canvas-help">Selecciona un elemento para editarlo</span>{!inspectorOpen && <button className="reopen-inspector" onClick={() => setInspectorOpen(true)}>Mostrar inspector <Icon name="arrow" size={13} /></button>}</div><div className="diagram-canvas" onClick={() => setSelectedNodeId('')}><div className="canvas-zoom-layer" style={{ transform: `scale(${zoom / 100})` }}><svg className="canvas-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path d="M22 48 C30 48, 30 35, 39 35 M55 36 C64 36, 64 50, 68 50 M77 59 C81 63, 82 66, 83 72" /></svg>{project.nodes.map((node) => <button key={node.id} className={`diagram-node node-${node.tone} ${selectedNode?.id === node.id ? 'is-selected' : ''}`} style={{ left: `${node.x}%`, top: `${node.y}%` }} onClick={(event) => { event.stopPropagation(); setSelectedNodeId(node.id); }}><span className="node-grip"><i /><i /><i /></span><strong>{node.label}</strong><small>{node.detail}</small></button>)}</div></div><div className="canvas-footer"><span>{project.nodes.length} elementos</span><span><kbd>⌘</kbd> + <kbd>K</kbd> para comandos</span></div></section>{inspectorOpen && <aside className="properties-panel"><div className="properties-head"><div><span className="section-kicker">Inspector</span><h2>Propiedades</h2></div><button className="icon-button" aria-label="Cerrar inspector" onClick={() => setInspectorOpen(false)}><Icon name="close" size={16} /></button></div>{selectedNode ? <div className="properties-content"><div className="selected-preview" style={{ backgroundColor: type.soft, color: type.color }}><Icon name={type.icon} size={21} /><span>{type.label}</span></div><label className="field-label">Título<input value={selectedNode.label} onChange={(event) => updateNode({ label: event.target.value })} /></label><label className="field-label">Descripción<textarea value={selectedNode.detail} onChange={(event) => updateNode({ detail: event.target.value })} rows={4} /></label><div className="property-meta"><span>ID del elemento</span><code>{selectedNode.id.slice(0, 12)}</code></div><button className="delete-element" onClick={deleteNode} disabled={project.nodes.length <= 1}><Icon name="trash" size={15} /> Eliminar elemento</button></div> : <div className="properties-empty"><span><Icon name="command" size={23} /></span><p>Selecciona un elemento del lienzo para editar sus propiedades.</p></div>}<button className="add-element-button" onClick={addNode}><Icon name="plus" size={15} /> Añadir elemento</button></aside>}</div></main>
     </div>
   );
 }
