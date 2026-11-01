@@ -334,3 +334,15 @@ kbd { padding: 2px 4px; border: 1px solid #dcdad2; border-radius: 3px; color: #8
 .timeline-title { font-size: 19px; padding: 0 0 6px; }
 .timeline-item textarea { resize: vertical; border: 0; outline: 0; color: #85837b; background: transparent; font-size: 12px; line-height: 1.5; }
 @media (max-width: 760px) { .specialized-main { padding: 32px 18px; } .presentation-workspace { grid-template-columns: 1fr; } .slide-list { border-right: 0; border-bottom: 1px solid var(--line); } .board-workspace { grid-template-columns: repeat(4, 220px); } }
+
+.organizer-card { width: 100%; display: flex; align-items: center; gap: 12px; margin-top: 26px; padding: 17px 19px; border: 1px solid #ded8ff; border-radius: 10px; color: #6a5e9c; background: #f8f6ff; text-align: left; transition: border .2s, background .2s, transform .2s; }
+.organizer-card:hover { border-color: #b9abef; background: #f2efff; transform: translateY(-1px); }
+.organizer-card strong, .organizer-card small { display: block; }
+.organizer-card strong { color: #4c427a; font-size: 12px; font-weight: 600; }
+.organizer-card small { color: #8a82aa; font-size: 11px; line-height: 1.45; margin-top: 3px; }
+.organizer-card > .icon { margin-left: auto; }
+.organizer-modal { width: min(100%, 650px); }
+.organizer-modal select { width: 100%; display: block; margin-top: 8px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 7px; color: var(--ink); background: #fff; font-size: 13px; }
+.organizer-input { min-height: 180px; font: 400 13px/1.55 'DM Mono', monospace !important; }
+.organizer-hint { display: flex; gap: 8px; align-items: flex-start; padding: 11px 12px; margin-bottom: 20px; border-radius: 8px; color: #7b7396; background: #f4f0ff; font-size: 11px; line-height: 1.45; }
+.primary-button:disabled { opacity: .4; cursor: not-allowed; transform: none; box-shadow: none; }

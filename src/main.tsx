@@ -237,6 +237,26 @@ function downloadProject(project: Project) {
   URL.revokeObjectURL(url);
 }
 
+
+function sourceLines(source: string) {
+  return source.split(/\r?\n/).map((line) => line.replace(/^\s*[-*•\d.)]+\s*/, '').trim()).filter(Boolean);
+}
+
+function organizeSource(name: string, type: string, source: string): Project {
+  const lines = sourceLines(source);
+  const title = name.trim() || lines[0] || 'Flujo organizado';
+  const items = lines.length > 1 ? lines.slice(1) : lines;
+  const project = createProject(title, type);
+  const tones = ['blue', 'lilac', 'orange', 'green'] as const;
+  const nodes = (labels: string[]) => labels.slice(0, 12).map((label, index) => ({ id: `organized-${Date.now()}-${index}`, label: label.slice(0, 70), detail: index === 0 ? 'Punto de partida' : `Elemento ${index + 1}`, x: 10 + (index % 4) * 25, y: 18 + Math.floor(index / 4) * 30, tone: tones[index % tones.length] }));
+  if (type === 'document') project.data = { document: `# ${title}\n\n${source.trim()}` };
+  else if (type === 'presentation') project.data = { slides: (items.length ? items : [title]).slice(0, 12).map((item, index) => ({ id: `slide-${Date.now()}-${index}`, title: index === 0 ? title : item, body: index === 0 ? source.trim() : `Desarrolla aquí la idea: ${item}` })) };
+  else if (type === 'board') project.data = { board: [{ id: 'backlog', title: 'Entrada', cards: items.slice(0, 5).map((item, index) => ({ id: `card-${Date.now()}-${index}`, title: item, detail: 'Pendiente de organizar' })) }, { id: 'progress', title: 'En progreso', cards: [] }, { id: 'review', title: 'Revisión', cards: [] }, { id: 'done', title: 'Hecho', cards: [] }] };
+  else if (type === 'timeline') project.data = { timeline: (items.length ? items : [title]).slice(0, 12).map((item, index) => ({ id: `phase-${Date.now()}-${index}`, title: item, date: `Fase ${index + 1}`, detail: 'Define responsable, dependencia y entregable.' })) };
+  else project.nodes = nodes(items.length ? items : [title]);
+  return project;
+}
+
 function App() {
   const [projects, setProjects] = useState<Project[]>(() => {
     try {
@@ -257,6 +277,7 @@ function App() {
   const [draftType, setDraftType] = useState('flow');
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [toast, setToast] = useState('');
+  const [organizerOpen, setOrganizerOpen] = useState(false);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
@@ -336,6 +357,14 @@ function App() {
     setProjects((current) => [duplicate, ...current]);
     setOpenMenu(null);
     setToast('Copia creada y guardada localmente');
+  };
+
+  const createOrganizedProject = (name: string, type: string, source: string) => {
+    const project = organizeSource(name, type, source);
+    setProjects((current) => [project, ...current]);
+    setOrganizerOpen(false);
+    openProject(project);
+    setToast('Información organizada en una estructura editable');
   };
 
   const removeProject = (project: Project) => {
@@ -428,14 +457,25 @@ function App() {
           </section>
 
           <section className="template-catalog"><div className="section-heading"><div><span className="section-kicker">Catálogo</span><h2>Plantillas reales para empezar</h2></div><span className="template-count">{workflowTemplates.length} plantillas</span></div><div className="template-grid">{workflowTemplates.map((template) => <button className="template-card" key={template.id} onClick={() => { const project = createProject(template.label, template.id); setProjects((current) => [project, ...current]); openProject(project); }}><span className="project-type-icon" style={{ color: template.color, backgroundColor: template.soft }}><Icon name={template.icon} size={21} /></span><span><strong>{template.label}</strong><small>{template.description}</small><em>Crear flujo →</em></span></button>)}</div></section>
+          <button className="organizer-card" onClick={() => setOrganizerOpen(true)}><span className="new-project-plus"><Icon name="spark" size={20} /></span><span><strong>Organiza información automáticamente</strong><small>Pega tus ideas y conviértelas en mapa, flujo, tablero, cronograma o presentación</small></span><Icon name="arrow" size={18} /></button>
           <button className="new-project-card" onClick={openNewModal}><span className="new-project-plus"><Icon name="plus" size={20} /></span><span><strong>Empieza algo nuevo</strong><small>Crea un espacio para ordenar tus ideas</small></span><Icon name="arrow" size={18} /></button>
         </div>
       </main>
 
       {modal && <ProjectModal mode={modal} name={draftName} type={draftType} setName={setDraftName} setType={setDraftType} onSubmit={submitProject} onClose={() => setModal(null)} />}
+      {organizerOpen && <OrganizerModal onClose={() => setOrganizerOpen(false)} onCreate={createOrganizedProject} />}
       {toast && <div className="toast"><span className="toast-check">✓</span>{toast}</div>}
     </div>
   );
+}
+
+
+function OrganizerModal({ onClose, onCreate }: { onClose: () => void; onCreate: (name: string, type: string, source: string) => void }) {
+  const [name, setName] = useState('');
+  const [type, setType] = useState('mindmap');
+  const [source, setSource] = useState('');
+  const canCreate = source.trim().length > 0;
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}><form className="project-modal organizer-modal" onSubmit={(event) => { event.preventDefault(); if (canCreate) onCreate(name, type, source); }}><div className="modal-head"><div><span className="section-kicker">Organizador inteligente</span><h2>Convierte información en una estructura</h2></div><button type="button" className="icon-button" onClick={onClose} aria-label="Cerrar"><Icon name="close" /></button></div><label className="field-label">Nombre<input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder="Ej. Plan de lanzamiento" /></label><label className="field-label">¿En qué quieres convertirlo?<select value={type} onChange={(event) => setType(event.target.value)}>{availableDiagramTypes.filter((item) => !['tasks'].includes(item.id)).map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label><label className="field-label">Pega notas, ideas o información<textarea className="organizer-input" value={source} onChange={(event) => setSource(event.target.value)} rows={9} placeholder={'Ejemplo:\nObjetivo del proyecto\nInvestigar necesidades\nDiseñar propuesta\nValidar con usuarios\nPublicar resultado'} /></label><div className="organizer-hint"><Icon name="spark" size={15} /><span>Detecta listas y líneas, las separa en elementos y las deja editables en la herramienta elegida.</span></div><div className="modal-foot"><span>{sourceLines(source).length} elementos detectados</span><div><button type="button" className="secondary-button" onClick={onClose}>Cancelar</button><button type="submit" className="primary-button" disabled={!canCreate}>Organizar información <Icon name="arrow" size={15} /></button></div></div></form></div>;
 }
 
 function ProjectModal({ mode, name, type, setName, setType, onSubmit, onClose }: { mode: 'new' | 'edit'; name: string; type: string; setName: (value: string) => void; setType: (value: string) => void; onSubmit: (event: FormEvent) => void; onClose: () => void }) {
