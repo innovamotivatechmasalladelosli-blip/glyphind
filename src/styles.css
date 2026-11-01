@@ -279,3 +279,17 @@ kbd { padding: 2px 4px; border: 1px solid #dcdad2; border-radius: 3px; color: #8
   .more-button { width: 29px; }
   .canvas-help { display: none; }
 }
+
+.nav-item-upcoming { opacity: .58; cursor: not-allowed; }
+.nav-item-upcoming small { display: block; color: var(--accent); font: 500 9px 'DM Mono', monospace; margin-top: 2px; }
+.template-catalog { margin-top: 43px; padding-top: 30px; border-top: 1px solid var(--line); }
+.template-count { color: #aaa8a0; font: 400 10px 'DM Mono', monospace; }
+.template-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.template-card { min-height: 142px; display: flex; flex-direction: column; align-items: flex-start; gap: 13px; padding: 15px; border: 1px solid var(--line); border-radius: 10px; color: var(--ink); background: #fffefa; text-align: left; transition: transform .18s, border .18s, box-shadow .18s; }
+.template-card:hover { border-color: #c7c4ba; transform: translateY(-2px); box-shadow: 0 8px 20px rgba(33,31,23,.07); }
+.template-card strong, .template-card small, .template-card em { display: block; }
+.template-card strong { font: 600 12px Manrope, sans-serif; }
+.template-card small { min-height: 30px; color: #999890; font-size: 10px; line-height: 1.4; margin-top: 4px; }
+.template-card em { color: var(--accent-dark); font: 500 10px 'DM Mono', monospace; font-style: normal; margin-top: 9px; }
+@media (max-width: 1050px) { .template-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 720px) { .template-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

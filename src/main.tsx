@@ -38,10 +38,19 @@ const STORAGE_KEY = 'glyphind-projects-v1';
 const diagramTypes: DiagramType[] = [
   { id: 'flow', label: 'Flujo', description: 'Procesos, decisiones y recorridos', icon: 'flow', color: '#5b63d8', soft: '#eef0ff' },
   { id: 'tasks', label: 'Pendientes', description: 'Listas, prioridades y avances', icon: 'checklist', color: '#db744f', soft: '#fff0e9' },
+  { id: 'document', label: 'Documento', description: 'Redacción, revisión y entrega', icon: 'folder', color: '#3478b9', soft: '#e8f3ff' },
+  { id: 'presentation', label: 'Presentación', description: 'Narrativa, diapositivas y revisión', icon: 'grid', color: '#bc633f', soft: '#fff0e8' },
+  { id: 'concept', label: 'Mapa conceptual', description: 'Conceptos, relaciones y síntesis', icon: 'command', color: '#2e8c86', soft: '#e7f8f5' },
+  { id: 'mindmap', label: 'Mapa mental', description: 'Ideas que crecen desde un centro', icon: 'spark', color: '#bd8b31', soft: '#fff7df' },
+  { id: 'timeline', label: 'Cronograma', description: 'Fases, dependencias y fechas', icon: 'arrow', color: '#7c5ab5', soft: '#f1ebff' },
+  { id: 'board', label: 'Tablero', description: 'Entrada, progreso, revisión y cierre', icon: 'checklist', color: '#2b8e78', soft: '#e7f7f1' },
+  { id: 'custom', label: 'Flujo personalizado', description: 'Construye cualquier proceso', icon: 'add', color: '#5b63d8', soft: '#eef0ff' },
   { id: 'team', label: 'Equipo', description: 'Roles, personas y estructura', icon: 'team', color: '#2b8e78', soft: '#e7f7f1' },
   { id: 'community', label: 'Comunidad', description: 'Relaciones, grupos y conexiones', icon: 'community', color: '#a45dbd', soft: '#f7eafa' },
-  { id: 'mindmap', label: 'Mapa mental', description: 'Ideas que crecen desde un centro', icon: 'spark', color: '#bd8b31', soft: '#fff7df' },
 ];
+
+const availableDiagramTypes = diagramTypes.filter((type) => type.id !== 'team' && type.id !== 'community');
+const workflowTemplates = availableDiagramTypes.filter((type) => ['document', 'presentation', 'concept', 'mindmap', 'timeline', 'board', 'custom'].includes(type.id));
 
 const defaultNodes: Record<string, DiagramNode[]> = {
   flow: [
@@ -71,6 +80,42 @@ const defaultNodes: Record<string, DiagramNode[]> = {
     { id: 'a', label: 'Contexto', detail: 'Lo que ya sabemos', x: 13, y: 18, tone: 'blue' },
     { id: 'b', label: 'Posibilidades', detail: 'Lo que podemos crear', x: 74, y: 18, tone: 'lilac' },
     { id: 'c', label: 'Siguiente paso', detail: 'Lo que haremos ahora', x: 71, y: 72, tone: 'green' },
+  ],
+  document: [
+    { id: 'brief', label: 'Entrada de contenido', detail: 'Texto o archivo fuente', x: 8, y: 38, tone: 'blue' },
+    { id: 'review', label: 'Revisión editorial', detail: 'Claridad y estructura', x: 35, y: 24, tone: 'lilac' },
+    { id: 'approval', label: 'Aprobación', detail: 'Responsable y criterios', x: 62, y: 42, tone: 'orange' },
+    { id: 'export', label: 'Exportar documento', detail: 'PDF / DOCX / Markdown', x: 80, y: 68, tone: 'green' },
+  ],
+  presentation: [
+    { id: 'pbrief', label: 'Brief', detail: 'Objetivo y audiencia', x: 8, y: 38, tone: 'blue' },
+    { id: 'story', label: 'Narrativa', detail: 'Guion y estructura', x: 35, y: 24, tone: 'lilac' },
+    { id: 'slides', label: 'Diapositivas', detail: 'Diseño y contenido', x: 62, y: 42, tone: 'orange' },
+    { id: 'delivery', label: 'Entrega', detail: 'Revisión final', x: 80, y: 68, tone: 'green' },
+  ],
+  concept: [
+    { id: 'topic', label: 'Tema central', detail: 'Pregunta que guía el mapa', x: 40, y: 40, tone: 'dark' },
+    { id: 'concepts', label: 'Conceptos clave', detail: 'Ideas principales', x: 12, y: 18, tone: 'blue' },
+    { id: 'relations', label: 'Relaciones', detail: 'Causas y consecuencias', x: 72, y: 18, tone: 'lilac' },
+    { id: 'summary', label: 'Síntesis visual', detail: 'Conclusión compartible', x: 70, y: 72, tone: 'green' },
+  ],
+  timeline: [
+    { id: 'scope', label: 'Alcance', detail: 'Resultado esperado', x: 8, y: 38, tone: 'blue' },
+    { id: 'phases', label: 'Fases y tareas', detail: 'Desglose del trabajo', x: 35, y: 24, tone: 'lilac' },
+    { id: 'dependencies', label: 'Dependencias', detail: 'Bloqueos y precedencias', x: 62, y: 42, tone: 'orange' },
+    { id: 'calendar', label: 'Calendario', detail: 'Fechas de entrega', x: 80, y: 68, tone: 'green' },
+  ],
+  board: [
+    { id: 'backlog', label: 'Entrada', detail: 'Ideas y solicitudes', x: 8, y: 38, tone: 'blue' },
+    { id: 'progress', label: 'En progreso', detail: 'Límite WIP', x: 35, y: 24, tone: 'orange' },
+    { id: 'qa', label: 'Revisión', detail: 'Criterios de aceptación', x: 62, y: 42, tone: 'lilac' },
+    { id: 'done', label: 'Hecho', detail: 'Resultado verificable', x: 80, y: 68, tone: 'green' },
+  ],
+  custom: [
+    { id: 'trigger', label: 'Disparador', detail: 'Qué inicia el flujo', x: 8, y: 38, tone: 'blue' },
+    { id: 'process', label: 'Transformación', detail: 'Regla o proceso', x: 35, y: 24, tone: 'lilac' },
+    { id: 'condition', label: 'Decisión', detail: 'Condición y caminos', x: 62, y: 42, tone: 'orange' },
+    { id: 'output', label: 'Salida', detail: 'Resultado final', x: 80, y: 68, tone: 'green' },
   ],
 };
 
@@ -286,15 +331,13 @@ function App() {
           <button className="nav-item is-active" onClick={() => { setActiveView('projects'); setMobileMenu(false); }}><Icon name="grid" /><span>Todos los proyectos</span><strong>{projects.length}</strong></button>
           <button className="nav-item" onClick={() => { setFilter('flow'); setMobileMenu(false); }}><Icon name="flow" /><span>Flujos</span></button>
           <button className="nav-item" onClick={() => { setFilter('tasks'); setMobileMenu(false); }}><Icon name="checklist" /><span>Pendientes</span></button>
-          <button className="nav-item" onClick={() => { setFilter('team'); setMobileMenu(false); }}><Icon name="team" /><span>Equipos</span></button>
-          <button className="nav-item" onClick={() => { setFilter('community'); setMobileMenu(false); }}><Icon name="community" /><span>Comunidades</span></button>
+          <button className="nav-item nav-item-upcoming" disabled><Icon name="team" /><span>Equipos <small>Próximamente</small></span></button>
+          <button className="nav-item nav-item-upcoming" disabled><Icon name="community" /><span>Comunidades <small>Próximamente</small></span></button>
           <div className="nav-divider" />
           <p className="nav-label">Biblioteca</p>
           <button className="nav-item" onClick={() => { setFilter('mindmap'); setMobileMenu(false); }}><Icon name="spark" /><span>Mapas mentales</span></button>
-          <button className="nav-item" onClick={() => { setFilter('all'); setSearch(''); setMobileMenu(false); }}><Icon name="archive" /><span>Archivo local</span></button>
         </nav>
         <div className="sidebar-bottom">
-          <div className="local-storage-card"><span className="status-dot" /><div><strong>Guardado local</strong><small>Solo en este dispositivo</small></div></div>
           <div className="sidebar-footnote"><span>G</span><span>Glyphind <em>0.1</em></span></div>
         </div>
       </aside>
@@ -314,12 +357,11 @@ function App() {
               <h1>Mis proyectos <span className="project-count">{projects.length}</span></h1>
               <p>Un lugar tranquilo para pensar, conectar y dar forma a tus ideas.</p>
             </div>
-            <div className="intro-note"><span className="intro-note-icon"><Icon name="save" size={15} /></span><span>Los cambios se guardan<br />automáticamente en tu navegador</span></div>
           </section>
 
           <section className="project-toolbar" aria-label="Buscar y filtrar proyectos">
             <div className="search-box"><Icon name="search" size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar proyectos..." aria-label="Buscar proyectos" />{search && <button className="search-clear" onClick={() => setSearch('')}><Icon name="close" size={14} /></button>}</div>
-            <label className="filter-box"><Icon name="filter" size={16} /><select value={filter} onChange={(event) => setFilter(event.target.value)} aria-label="Filtrar por tipo"><option value="all">Todos los tipos</option>{diagramTypes.map((type) => <option key={type.id} value={type.id}>{type.label}</option>)}</select><Icon name="chevron" size={15} /></label>
+            <label className="filter-box"><Icon name="filter" size={16} /><select value={filter} onChange={(event) => setFilter(event.target.value)} aria-label="Filtrar por tipo"><option value="all">Todos los tipos</option>{availableDiagramTypes.map((type) => <option key={type.id} value={type.id}>{type.label}</option>)}</select><Icon name="chevron" size={15} /></label>
             <span className="toolbar-result">{filteredProjects.length} {filteredProjects.length === 1 ? 'proyecto' : 'proyectos'}</span>
           </section>
 
@@ -347,8 +389,8 @@ function App() {
             )}
           </section>
 
+          <section className="template-catalog"><div className="section-heading"><div><span className="section-kicker">Catálogo</span><h2>Plantillas reales para empezar</h2></div><span className="template-count">{workflowTemplates.length} plantillas</span></div><div className="template-grid">{workflowTemplates.map((template) => <button className="template-card" key={template.id} onClick={() => { const project = createProject(template.label, template.id); setProjects((current) => [project, ...current]); openProject(project); }}><span className="project-type-icon" style={{ color: template.color, backgroundColor: template.soft }}><Icon name={template.icon} size={21} /></span><span><strong>{template.label}</strong><small>{template.description}</small><em>Crear flujo →</em></span></button>)}</div></section>
           <button className="new-project-card" onClick={openNewModal}><span className="new-project-plus"><Icon name="plus" size={20} /></span><span><strong>Empieza algo nuevo</strong><small>Crea un espacio para ordenar tus ideas</small></span><Icon name="arrow" size={18} /></button>
-          <footer className="page-footer"><span>Glyphind funciona sin conexión y sin cuentas.</span><span><span className="footer-dot" /> Tus datos no salen de este dispositivo</span></footer>
         </div>
       </main>
 
@@ -364,8 +406,8 @@ function ProjectModal({ mode, name, type, setName, setType, onSubmit, onClose }:
       <form className="project-modal" onSubmit={onSubmit}>
         <div className="modal-head"><div><span className="section-kicker">{mode === 'new' ? 'Nuevo espacio' : 'Editar espacio'}</span><h2>{mode === 'new' ? 'Crea tu próximo proyecto' : 'Ajusta los detalles'}</h2></div><button type="button" className="icon-button" onClick={onClose} aria-label="Cerrar"><Icon name="close" /></button></div>
         <label className="field-label">Nombre del proyecto<input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder="Ej. Flujo de incorporación" /></label>
-        <div className="field-label">Tipo de diagrama<div className="type-choice-grid">{diagramTypes.map((item) => <button type="button" key={item.id} className={`type-choice ${type === item.id ? 'is-selected' : ''}`} onClick={() => setType(item.id)}><span style={{ color: item.color, backgroundColor: item.soft }}><Icon name={item.icon} size={19} /></span><span><strong>{item.label}</strong><small>{item.description}</small></span>{type === item.id && <i>✓</i>}</button>)}</div></div>
-        <div className="modal-foot"><span><Icon name="save" size={14} /> Se guardará solo en este dispositivo</span><div><button type="button" className="secondary-button" onClick={onClose}>Cancelar</button><button type="submit" className="primary-button">{mode === 'new' ? 'Crear proyecto' : 'Guardar cambios'} <Icon name="arrow" size={15} /></button></div></div>
+        <div className="field-label">Tipo de diagrama<div className="type-choice-grid">{availableDiagramTypes.map((item) => <button type="button" key={item.id} className={`type-choice ${type === item.id ? 'is-selected' : ''}`} onClick={() => setType(item.id)}><span style={{ color: item.color, backgroundColor: item.soft }}><Icon name={item.icon} size={19} /></span><span><strong>{item.label}</strong><small>{item.description}</small></span>{type === item.id && <i>✓</i>}</button>)}</div></div>
+        <div className="modal-foot"><span>Configura tu espacio y empieza a trabajar</span><div><button type="button" className="secondary-button" onClick={onClose}>Cancelar</button><button type="submit" className="primary-button">{mode === 'new' ? 'Crear proyecto' : 'Guardar cambios'} <Icon name="arrow" size={15} /></button></div></div>
       </form>
     </div>
   );
@@ -399,8 +441,8 @@ function Editor({ project, onBack, onChange, onToast }: { project: Project; onBa
 
   return (
     <div className="editor-shell">
-      <header className="editor-topbar"><button className="back-link" onClick={onBack}><Icon name="back" size={17} /> Volver a proyectos</button><div className="editor-breadcrumb"><span>/</span><span>{project.name}</span><span className="editor-type-pill" style={{ color: type.color, backgroundColor: type.soft }}><Icon name={type.icon} size={13} /> {type.label}</span></div><div className="editor-actions"><span className="saved-label"><span className="status-dot" /> Guardado localmente</span><button className="icon-button" title="Compartir (próximamente)"><Icon name="share" size={17} /></button><button className="primary-button compact" onClick={() => onToast('Todos los cambios están guardados en tu dispositivo')}><Icon name="save" size={15} /> Guardar</button></div></header>
-      <main className="editor-main"><div className="editor-heading"><div><span className="section-kicker">Editor de diagrama</span><h1>{project.name}</h1><p>{type.description}. Cambia los elementos y todo quedará guardado aquí.</p></div><button className="secondary-button" onClick={() => onToast('La exportación estará disponible pronto')}><Icon name="arrow" size={15} /> Exportar</button></div><div className={`editor-workspace ${inspectorOpen ? '' : 'inspector-is-closed'}`}><aside className="canvas-tools"><span className="tool-label">Herramientas</span><button className="tool-button is-active" title="Seleccionar"><Icon name="command" /></button><button className="tool-button" title="Añadir elemento" onClick={addNode}><Icon name="add" /></button><div className="tools-line" /><span className="tool-label">Vista</span><button className="tool-button" title="Ajustar lienzo"><Icon name="grid" /></button><span className="zoom-value">100%</span></aside><section className="canvas-section"><div className="canvas-header"><span><span className="canvas-live-dot" /> Lienzo de trabajo</span><span className="canvas-help">Selecciona un elemento para editarlo</span>{!inspectorOpen && <button className="reopen-inspector" onClick={() => setInspectorOpen(true)}>Mostrar inspector <Icon name="arrow" size={13} /></button>}</div><div className="diagram-canvas" onClick={() => setSelectedNodeId('')}><svg className="canvas-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path d="M22 48 C30 48, 30 35, 39 35 M55 36 C64 36, 64 50, 68 50 M77 59 C81 63, 82 66, 83 72" /></svg>{project.nodes.map((node) => <button key={node.id} className={`diagram-node node-${node.tone} ${selectedNode?.id === node.id ? 'is-selected' : ''}`} style={{ left: `${node.x}%`, top: `${node.y}%` }} onClick={(event) => { event.stopPropagation(); setSelectedNodeId(node.id); }}><span className="node-grip"><i /><i /><i /></span><strong>{node.label}</strong><small>{node.detail}</small></button>)}</div><div className="canvas-footer"><span>{project.nodes.length} elementos</span><span><kbd>⌘</kbd> + <kbd>K</kbd> para comandos</span></div></section>{inspectorOpen && <aside className="properties-panel"><div className="properties-head"><div><span className="section-kicker">Inspector</span><h2>Propiedades</h2></div><button className="icon-button" aria-label="Cerrar inspector" onClick={() => setInspectorOpen(false)}><Icon name="close" size={16} /></button></div>{selectedNode ? <div className="properties-content"><div className="selected-preview" style={{ backgroundColor: type.soft, color: type.color }}><Icon name={type.icon} size={21} /><span>{type.label}</span></div><label className="field-label">Título<input value={selectedNode.label} onChange={(event) => updateNode({ label: event.target.value })} /></label><label className="field-label">Descripción<textarea value={selectedNode.detail} onChange={(event) => updateNode({ detail: event.target.value })} rows={4} /></label><div className="property-meta"><span>ID del elemento</span><code>{selectedNode.id.slice(0, 12)}</code></div><button className="delete-element" onClick={deleteNode} disabled={project.nodes.length <= 1}><Icon name="trash" size={15} /> Eliminar elemento</button></div> : <div className="properties-empty"><span><Icon name="command" size={23} /></span><p>Selecciona un elemento del lienzo para editar sus propiedades.</p></div>}<button className="add-element-button" onClick={addNode}><Icon name="plus" size={15} /> Añadir elemento</button></aside>}</div></main>
+      <header className="editor-topbar"><button className="back-link" onClick={onBack}><Icon name="back" size={17} /> Volver a proyectos</button><div className="editor-breadcrumb"><span>/</span><span>{project.name}</span><span className="editor-type-pill" style={{ color: type.color, backgroundColor: type.soft }}><Icon name={type.icon} size={13} /> {type.label}</span></div><div className="editor-actions"><span className="saved-label"><span className="canvas-live-dot" /> Cambios activos</span><button className="icon-button" title="Compartir (próximamente)" disabled><Icon name="share" size={17} /></button></div></header>
+      <main className="editor-main"><div className="editor-heading"><div><span className="section-kicker">Editor de diagrama</span><h1>{project.name}</h1><p>{type.description}. Cambia, elimina o añade elementos para construir tu flujo.</p></div><button className="secondary-button" onClick={() => onToast('La exportación estará disponible pronto')}><Icon name="arrow" size={15} /> Exportar</button></div><div className={`editor-workspace ${inspectorOpen ? '' : 'inspector-is-closed'}`}><aside className="canvas-tools"><span className="tool-label">Herramientas</span><button className="tool-button is-active" title="Seleccionar"><Icon name="command" /></button><button className="tool-button" title="Añadir elemento" onClick={addNode}><Icon name="add" /></button><div className="tools-line" /><span className="tool-label">Vista</span><button className="tool-button" title="Ajustar lienzo"><Icon name="grid" /></button><span className="zoom-value">100%</span></aside><section className="canvas-section"><div className="canvas-header"><span><span className="canvas-live-dot" /> Lienzo de trabajo</span><span className="canvas-help">Selecciona un elemento para editarlo</span>{!inspectorOpen && <button className="reopen-inspector" onClick={() => setInspectorOpen(true)}>Mostrar inspector <Icon name="arrow" size={13} /></button>}</div><div className="diagram-canvas" onClick={() => setSelectedNodeId('')}><svg className="canvas-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path d="M22 48 C30 48, 30 35, 39 35 M55 36 C64 36, 64 50, 68 50 M77 59 C81 63, 82 66, 83 72" /></svg>{project.nodes.map((node) => <button key={node.id} className={`diagram-node node-${node.tone} ${selectedNode?.id === node.id ? 'is-selected' : ''}`} style={{ left: `${node.x}%`, top: `${node.y}%` }} onClick={(event) => { event.stopPropagation(); setSelectedNodeId(node.id); }}><span className="node-grip"><i /><i /><i /></span><strong>{node.label}</strong><small>{node.detail}</small></button>)}</div><div className="canvas-footer"><span>{project.nodes.length} elementos</span><span><kbd>⌘</kbd> + <kbd>K</kbd> para comandos</span></div></section>{inspectorOpen && <aside className="properties-panel"><div className="properties-head"><div><span className="section-kicker">Inspector</span><h2>Propiedades</h2></div><button className="icon-button" aria-label="Cerrar inspector" onClick={() => setInspectorOpen(false)}><Icon name="close" size={16} /></button></div>{selectedNode ? <div className="properties-content"><div className="selected-preview" style={{ backgroundColor: type.soft, color: type.color }}><Icon name={type.icon} size={21} /><span>{type.label}</span></div><label className="field-label">Título<input value={selectedNode.label} onChange={(event) => updateNode({ label: event.target.value })} /></label><label className="field-label">Descripción<textarea value={selectedNode.detail} onChange={(event) => updateNode({ detail: event.target.value })} rows={4} /></label><div className="property-meta"><span>ID del elemento</span><code>{selectedNode.id.slice(0, 12)}</code></div><button className="delete-element" onClick={deleteNode} disabled={project.nodes.length <= 1}><Icon name="trash" size={15} /> Eliminar elemento</button></div> : <div className="properties-empty"><span><Icon name="command" size={23} /></span><p>Selecciona un elemento del lienzo para editar sus propiedades.</p></div>}<button className="add-element-button" onClick={addNode}><Icon name="plus" size={15} /> Añadir elemento</button></aside>}</div></main>
     </div>
   );
 }
