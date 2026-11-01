@@ -57,7 +57,6 @@ const diagramTypes: DiagramType[] = [
 ];
 
 const availableDiagramTypes = diagramTypes.filter((type) => type.id !== 'team' && type.id !== 'community');
-const workflowTemplates = availableDiagramTypes.filter((type) => ['document', 'presentation', 'concept', 'mindmap', 'timeline', 'board', 'custom'].includes(type.id));
 
 const defaultNodes: Record<string, DiagramNode[]> = {
   flow: [
@@ -258,25 +257,6 @@ function downloadProject(project: Project) {
 }
 
 
-function sourceLines(source: string) {
-  return source.split(/\r?\n/).map((line) => line.replace(/^\s*[-*•\d.)]+\s*/, '').trim()).filter(Boolean);
-}
-
-function organizeSource(name: string, type: string, source: string, relatedProjects: Project[] = []): Project {
-  const lines = sourceLines(source);
-  const title = name.trim() || lines[0] || 'Flujo organizado';
-  const items = lines.length > 1 ? lines.slice(1) : lines;
-  const project = createProject(title, type, relatedProjects);
-  const tones = ['blue', 'lilac', 'orange', 'green'] as const;
-  const nodes = (labels: string[]) => labels.slice(0, 12).map((label, index) => ({ id: `organized-${Date.now()}-${index}`, label: label.slice(0, 70), detail: index === 0 ? 'Punto de partida' : `Elemento ${index + 1}`, x: 10 + (index % 4) * 25, y: 18 + Math.floor(index / 4) * 30, tone: tones[index % tones.length] }));
-  if (type === 'document') project.data = { document: `# ${title}\n\n${source.trim()}` };
-  else if (type === 'presentation') project.data = { slides: [...(items.length ? items : [title]).slice(0, 12).map((item, index) => ({ id: `slide-${Date.now()}-${index}`, title: index === 0 ? title : item, body: index === 0 ? source.trim() : `Desarrolla aquí la idea: ${item}` })), ...presentationSlidesFor(relatedProjects)] };
-  else if (type === 'board') project.data = { board: [{ id: 'backlog', title: 'Entrada', cards: items.slice(0, 5).map((item, index) => ({ id: `card-${Date.now()}-${index}`, title: item, detail: 'Pendiente de organizar' })) }, { id: 'progress', title: 'En progreso', cards: [] }, { id: 'review', title: 'Revisión', cards: [] }, { id: 'done', title: 'Hecho', cards: [] }] };
-  else if (type === 'timeline') project.data = { timeline: (items.length ? items : [title]).slice(0, 12).map((item, index) => ({ id: `phase-${Date.now()}-${index}`, title: item, date: `Fase ${index + 1}`, detail: 'Define responsable, dependencia y entregable.' })) };
-  else project.nodes = nodes(items.length ? items : [title]);
-  return project;
-}
-
 function App() {
   const [projects, setProjects] = useState<Project[]>(() => {
     try {
@@ -297,7 +277,6 @@ function App() {
   const [draftType, setDraftType] = useState('flow');
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [toast, setToast] = useState('');
-  const [organizerOpen, setOrganizerOpen] = useState(false);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
@@ -379,14 +358,6 @@ function App() {
     setToast('Copia creada y guardada localmente');
   };
 
-  const createOrganizedProject = (name: string, type: string, source: string) => {
-    const project = organizeSource(name, type, source, type === 'presentation' ? projects : []);
-    setProjects((current) => [project, ...current]);
-    setOrganizerOpen(false);
-    openProject(project);
-    setToast('Información organizada en una estructura editable');
-  };
-
   const removeProject = (project: Project) => {
     if (!window.confirm(`¿Eliminar «${project.name}»? Esta acción no se puede deshacer.`)) return;
     setProjects((current) => current.filter((item) => item.id !== project.id));
@@ -419,11 +390,6 @@ function App() {
           <button className="nav-item is-active" onClick={() => { setActiveView('projects'); setMobileMenu(false); }}><Icon name="grid" /><span>Todos los proyectos</span><strong>{projects.length}</strong></button>
           <button className="nav-item" onClick={() => { setFilter('flow'); setMobileMenu(false); }}><Icon name="flow" /><span>Flujos</span></button>
           <button className="nav-item" onClick={() => { setFilter('tasks'); setMobileMenu(false); }}><Icon name="checklist" /><span>Pendientes</span></button>
-          <button className="nav-item nav-item-upcoming" disabled><Icon name="team" /><span>Equipos <small>Próximamente</small></span></button>
-          <button className="nav-item nav-item-upcoming" disabled><Icon name="community" /><span>Comunidades <small>Próximamente</small></span></button>
-          <div className="nav-divider" />
-          <p className="nav-label">Biblioteca</p>
-          <button className="nav-item" onClick={() => { setFilter('mindmap'); setMobileMenu(false); }}><Icon name="spark" /><span>Mapas mentales</span></button>
         </nav>
         <div className="sidebar-bottom">
           <div className="sidebar-footnote"><span>G</span><span>Glyphind <em>0.1</em></span></div>
@@ -435,17 +401,11 @@ function App() {
         <header className="topbar">
           <button className="icon-button mobile-menu-button" aria-label="Abrir menú" onClick={() => setMobileMenu(true)}><Icon name="menu" /></button>
           <div className="breadcrumbs"><span>Espacio de trabajo</span><span className="breadcrumb-slash">/</span><strong>Proyectos</strong></div>
-          <div className="topbar-actions"><span className="keyboard-hint"><Icon name="command" size={13} /><span>K</span></span><button className="top-new-button" onClick={openNewModal}><Icon name="plus" size={16} /> Nuevo proyecto</button></div>
+          <div className="topbar-actions"><button className="top-new-button" onClick={openNewModal}><Icon name="plus" size={16} /> Nuevo proyecto</button></div>
         </header>
 
         <div className="page-wrap">
-          <section className="page-intro">
-            <div>
-              <div className="eyebrow"><span className="eyebrow-line" /> Tu espacio local</div>
-              <h1>Mis proyectos <span className="project-count">{projects.length}</span></h1>
-              <p>Un lugar tranquilo para pensar, conectar y dar forma a tus ideas.</p>
-            </div>
-          </section>
+          <section className="page-intro"><div><div className="eyebrow"><span className="eyebrow-line" /> Espacio de trabajo</div><h1>Mis proyectos <span className="project-count">{projects.length}</span></h1></div></section>
 
           <section className="project-toolbar" aria-label="Buscar y filtrar proyectos">
             <div className="search-box"><Icon name="search" size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar proyectos..." aria-label="Buscar proyectos" />{search && <button className="search-clear" onClick={() => setSearch('')}><Icon name="close" size={14} /></button>}</div>
@@ -454,7 +414,7 @@ function App() {
           </section>
 
           <section className="projects-section">
-            <div className="section-heading"><div><span className="section-kicker">Vista general</span><h2>Proyectos recientes</h2></div><button className="text-action" onClick={openNewModal}>Crear otro <Icon name="arrow" size={15} /></button></div>
+            <div className="section-heading"><div><span className="section-kicker">Vista general</span><h2>Proyectos recientes</h2></div></div>
             {filteredProjects.length > 0 ? (
               <div className="project-list">
                 {filteredProjects.map((project, index) => {
@@ -477,27 +437,15 @@ function App() {
             )}
           </section>
 
-          <section className="template-catalog"><div className="section-heading"><div><span className="section-kicker">Catálogo</span><h2>Plantillas reales para empezar</h2></div><span className="template-count">{workflowTemplates.length} plantillas</span></div><div className="template-grid">{workflowTemplates.map((template) => <button className="template-card" key={template.id} onClick={() => { const project = createProject(template.label, template.id); setProjects((current) => [project, ...current]); openProject(project); }}><span className="project-type-icon" style={{ color: template.color, backgroundColor: template.soft }}><Icon name={template.icon} size={21} /></span><span><strong>{template.label}</strong><small>{template.description}</small><em>Crear flujo →</em></span></button>)}</div></section>
-          <button className="organizer-card" onClick={() => setOrganizerOpen(true)}><span className="new-project-plus"><Icon name="spark" size={20} /></span><span><strong>Organiza información automáticamente</strong><small>Pega tus ideas y conviértelas en mapa, flujo, tablero, cronograma o presentación</small></span><Icon name="arrow" size={18} /></button>
-          <button className="new-project-card" onClick={openNewModal}><span className="new-project-plus"><Icon name="plus" size={20} /></span><span><strong>Empieza algo nuevo</strong><small>Crea un espacio para ordenar tus ideas</small></span><Icon name="arrow" size={18} /></button>
         </div>
       </main>
 
       {modal && <ProjectModal mode={modal} name={draftName} type={draftType} setName={setDraftName} setType={setDraftType} onSubmit={submitProject} onClose={() => setModal(null)} />}
-      {organizerOpen && <OrganizerModal onClose={() => setOrganizerOpen(false)} onCreate={createOrganizedProject} />}
       {toast && <div className="toast"><span className="toast-check">✓</span>{toast}</div>}
     </div>
   );
 }
 
-
-function OrganizerModal({ onClose, onCreate }: { onClose: () => void; onCreate: (name: string, type: string, source: string) => void }) {
-  const [name, setName] = useState('');
-  const [type, setType] = useState('mindmap');
-  const [source, setSource] = useState('');
-  const canCreate = source.trim().length > 0;
-  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}><form className="project-modal organizer-modal" onSubmit={(event) => { event.preventDefault(); if (canCreate) onCreate(name, type, source); }}><div className="modal-head"><div><span className="section-kicker">Organizador inteligente</span><h2>Convierte información en una estructura</h2></div><button type="button" className="icon-button" onClick={onClose} aria-label="Cerrar"><Icon name="close" /></button></div><label className="field-label">Nombre<input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder="Ej. Plan de lanzamiento" /></label><label className="field-label">¿En qué quieres convertirlo?<select value={type} onChange={(event) => setType(event.target.value)}>{availableDiagramTypes.filter((item) => !['tasks'].includes(item.id)).map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label><label className="field-label">Pega notas, ideas o información<textarea className="organizer-input" value={source} onChange={(event) => setSource(event.target.value)} rows={9} placeholder={'Ejemplo:\nObjetivo del proyecto\nInvestigar necesidades\nDiseñar propuesta\nValidar con usuarios\nPublicar resultado'} /></label><div className="organizer-hint"><Icon name="spark" size={15} /><span>Detecta listas y líneas, las separa en elementos y las deja editables en la herramienta elegida.</span></div><div className="modal-foot"><span>{sourceLines(source).length} elementos detectados</span><div><button type="button" className="secondary-button" onClick={onClose}>Cancelar</button><button type="submit" className="primary-button" disabled={!canCreate}>Organizar información <Icon name="arrow" size={15} /></button></div></div></form></div>;
-}
 
 function ProjectModal({ mode, name, type, setName, setType, onSubmit, onClose }: { mode: 'new' | 'edit'; name: string; type: string; setName: (value: string) => void; setType: (value: string) => void; onSubmit: (event: FormEvent) => void; onClose: () => void }) {
   return (
@@ -618,7 +566,7 @@ function Editor({ project, allProjects, onBack, onChange, onToast }: { project: 
 
   return (
     <div className="editor-shell">
-      <header className="editor-topbar"><button className="back-link" onClick={onBack}><Icon name="back" size={17} /> Volver a proyectos</button><div className="editor-breadcrumb"><span>/</span><span>{project.name}</span><span className="editor-type-pill" style={{ color: type.color, backgroundColor: type.soft }}><Icon name={type.icon} size={13} /> {type.label}</span></div><div className="editor-actions"><span className="saved-label"><span className="canvas-live-dot" /> Cambios activos</span><button className="icon-button" title="Compartir (próximamente)" disabled><Icon name="share" size={17} /></button></div></header>
+      <header className="editor-topbar"><button className="back-link" onClick={onBack}><Icon name="back" size={17} /> Volver a proyectos</button><div className="editor-breadcrumb"><span>/</span><span>{project.name}</span><span className="editor-type-pill" style={{ color: type.color, backgroundColor: type.soft }}><Icon name={type.icon} size={13} /> {type.label}</span></div><div className="editor-actions"><span className="saved-label"><span className="canvas-live-dot" /> Guardado local</span></div></header>
       <main className="editor-main"><div className="editor-heading"><div><span className="section-kicker">Editor de diagrama</span><h1>{project.name}</h1><p>{type.description}. Cambia, elimina o añade elementos para construir tu flujo.</p></div><button className="secondary-button" onClick={() => { downloadProject(project); onToast('Flujo exportado como Markdown'); }}><Icon name="arrow" size={15} /> Exportar</button></div><div className={`editor-workspace ${inspectorOpen ? '' : 'inspector-is-closed'}`}><aside className="canvas-tools"><span className="tool-label">Herramientas</span><button className="tool-button is-active" title="Seleccionar"><Icon name="command" /></button><button className="tool-button" title="Añadir elemento" onClick={addNode}><Icon name="add" /></button><div className="tools-line" /><span className="tool-label">Vista</span><button className="tool-button" title="Ajustar lienzo" onClick={fitCanvas}><Icon name="grid" /></button><button className="zoom-value zoom-button" title="Cambiar zoom" onClick={cycleZoom}>{zoom}%</button></aside><section className="canvas-section"><div className="canvas-header"><span><span className="canvas-live-dot" /> Lienzo de trabajo</span><span className="canvas-help">Selecciona un elemento para editarlo</span>{!inspectorOpen && <button className="reopen-inspector" onClick={() => setInspectorOpen(true)}>Mostrar inspector <Icon name="arrow" size={13} /></button>}</div><div className="diagram-canvas" onClick={() => setSelectedNodeId('')}><div className="canvas-zoom-layer" style={{ transform: `scale(${zoom / 100})` }}><svg className="canvas-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path d="M22 48 C30 48, 30 35, 39 35 M55 36 C64 36, 64 50, 68 50 M77 59 C81 63, 82 66, 83 72" /></svg>{project.nodes.map((node) => <button key={node.id} className={`diagram-node node-${node.tone} ${selectedNode?.id === node.id ? 'is-selected' : ''}`} style={{ left: `${node.x}%`, top: `${node.y}%` }} onClick={(event) => { event.stopPropagation(); setSelectedNodeId(node.id); }}><span className="node-grip"><i /><i /><i /></span><strong>{node.label}</strong><small>{node.detail}</small></button>)}</div></div><div className="canvas-footer"><span>{project.nodes.length} elementos</span><span><kbd>⌘</kbd> + <kbd>K</kbd> para comandos</span></div></section>{inspectorOpen && <aside className="properties-panel"><div className="properties-head"><div><span className="section-kicker">Inspector</span><h2>Propiedades</h2></div><button className="icon-button" aria-label="Cerrar inspector" onClick={() => setInspectorOpen(false)}><Icon name="close" size={16} /></button></div>{selectedNode ? <div className="properties-content"><div className="selected-preview" style={{ backgroundColor: type.soft, color: type.color }}><Icon name={type.icon} size={21} /><span>{type.label}</span></div><label className="field-label">Título<input value={selectedNode.label} onChange={(event) => updateNode({ label: event.target.value })} /></label><label className="field-label">Descripción<textarea value={selectedNode.detail} onChange={(event) => updateNode({ detail: event.target.value })} rows={4} /></label><div className="property-meta"><span>ID del elemento</span><code>{selectedNode.id.slice(0, 12)}</code></div><button className="delete-element" onClick={deleteNode} disabled={project.nodes.length <= 1}><Icon name="trash" size={15} /> Eliminar elemento</button></div> : <div className="properties-empty"><span><Icon name="command" size={23} /></span><p>Selecciona un elemento del lienzo para editar sus propiedades.</p></div>}<button className="add-element-button" onClick={addNode}><Icon name="plus" size={15} /> Añadir elemento</button></aside>}</div></main>
     </div>
   );
