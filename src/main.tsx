@@ -16,12 +16,19 @@ type DiagramNode = {
   tone: string;
 };
 
+type Slide = { id: string; title: string; body: string };
+type BoardCard = { id: string; title: string; detail: string };
+type BoardColumn = { id: string; title: string; cards: BoardCard[] };
+type TimelineItem = { id: string; title: string; date: string; detail: string };
+type ProjectData = { document?: string; slides?: Slide[]; board?: BoardColumn[]; timeline?: TimelineItem[] };
+
 type Project = {
   id: string;
   name: string;
   type: string;
   updated: number;
   nodes: DiagramNode[];
+  data?: ProjectData;
 };
 
 type DiagramType = {
@@ -189,6 +196,14 @@ function formatDate(timestamp: number) {
   return `Hace ${days} días`;
 }
 
+function initialData(type: string): ProjectData {
+  if (type === 'document') return { document: '# Documento nuevo\n\nEscribe aquí el contenido de tu documento.\n\n## Próximos pasos\n- Añade el contexto\n- Revisa el contenido\n- Comparte la versión final' };
+  if (type === 'presentation') return { slides: [{ id: `slide-${Date.now()}`, title: 'Título de la presentación', body: 'Escribe la idea principal de esta diapositiva.' }] };
+  if (type === 'board') return { board: [{ id: 'backlog', title: 'Entrada', cards: [{ id: `card-${Date.now()}`, title: 'Primera tarjeta', detail: 'Describe el trabajo pendiente' }] }, { id: 'progress', title: 'En progreso', cards: [] }, { id: 'review', title: 'Revisión', cards: [] }, { id: 'done', title: 'Hecho', cards: [] }] };
+  if (type === 'timeline') return { timeline: [{ id: `phase-${Date.now()}`, title: 'Definir alcance', date: 'Semana 1', detail: 'Alinear objetivos, responsables y entregables.' }, { id: `phase-${Date.now()}-2`, title: 'Construir primera versión', date: 'Semana 2', detail: 'Ejecutar las tareas prioritarias.' }] };
+  return {};
+}
+
 function createProject(name: string, type: string): Project {
   return {
     id: `project-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -196,12 +211,14 @@ function createProject(name: string, type: string): Project {
     type,
     updated: Date.now(),
     nodes: defaultNodes[type]?.map((node) => ({ ...node, id: `${node.id}-${Date.now()}` })) ?? defaultNodes.flow,
+    data: initialData(type),
   };
 }
 
 function downloadProject(project: Project) {
   const type = typeFor(project.type);
-  const body = [
+  const specialized = project.data?.document ?? (project.data?.slides ? project.data.slides.map((slide, index) => `## ${index + 1}. ${slide.title}\n\n${slide.body}`).join('\n\n') : project.data?.timeline ? project.data.timeline.map((item) => `## ${item.date} · ${item.title}\n\n${item.detail}`).join('\n\n') : project.data?.board ? project.data.board.map((column) => `## ${column.title}\n\n${column.cards.map((card) => `- **${card.title}** — ${card.detail}`).join('\n')}`).join('\n\n') : null);
+  const body = specialized ?? [
     `# ${project.name}`,
     `Tipo: ${type.label}`,
     '',
@@ -434,12 +451,52 @@ function ProjectModal({ mode, name, type, setName, setType, onSubmit, onClose }:
   );
 }
 
+
+function WorkspaceFrame({ project, children, onBack, onExport }: { project: Project; children: React.ReactNode; onBack: () => void; onExport: () => void }) {
+  const type = typeFor(project.type);
+  return <div className="editor-shell"><header className="editor-topbar"><button className="back-link" onClick={onBack}><Icon name="back" size={17} /> Volver a proyectos</button><div className="editor-breadcrumb"><span>/</span><span>{project.name}</span><span className="editor-type-pill" style={{ color: type.color, backgroundColor: type.soft }}><Icon name={type.icon} size={13} /> {type.label}</span></div><div className="editor-actions"><span className="saved-label"><span className="canvas-live-dot" /> Cambios activos</span><button className="secondary-button" onClick={onExport}><Icon name="arrow" size={14} /> Exportar</button></div></header><main className="specialized-main">{children}</main></div>;
+}
+
+function DocumentEditor({ project, onBack, onChange, onToast }: { project: Project; onBack: () => void; onChange: (project: Project) => void; onToast: (message: string) => void }) {
+  const content = project.data?.document ?? '';
+  return <WorkspaceFrame project={project} onBack={onBack} onExport={() => { downloadProject(project); onToast('Documento exportado como Markdown'); }}><div className="specialized-heading"><span className="section-kicker">Editor de documento</span><h1>{project.name}</h1><p>Redacta, estructura y revisa el contenido directamente.</p></div><div className="document-workspace"><textarea className="document-textarea" value={content} onChange={(event) => onChange({ ...project, data: { ...project.data, document: event.target.value } })} spellCheck /></div><div className="specialized-foot">{content.split(/\s+/).filter(Boolean).length} palabras · cambios guardados automáticamente</div></WorkspaceFrame>;
+}
+
+function PresentationEditor({ project, onBack, onChange, onToast }: { project: Project; onBack: () => void; onChange: (project: Project) => void; onToast: (message: string) => void }) {
+  const slides = project.data?.slides ?? [];
+  const [active, setActive] = useState(0);
+  const slide = slides[active] ?? slides[0];
+  const update = (patch: Partial<Slide>) => slide && onChange({ ...project, data: { ...project.data, slides: slides.map((item, index) => index === active ? { ...item, ...patch } : item) } });
+  const add = () => { const next = { id: `slide-${Date.now()}`, title: 'Nueva diapositiva', body: 'Añade el contenido de esta diapositiva.' }; onChange({ ...project, data: { ...project.data, slides: [...slides, next] } }); setActive(slides.length); onToast('Diapositiva añadida'); };
+  const remove = () => { if (slides.length <= 1) return; const next = slides.filter((_, index) => index !== active); onChange({ ...project, data: { ...project.data, slides: next } }); setActive(Math.max(0, active - 1)); };
+  return <WorkspaceFrame project={project} onBack={onBack} onExport={() => { downloadProject(project); onToast('Presentación exportada como Markdown'); }}><div className="specialized-heading"><span className="section-kicker">Editor de presentación</span><h1>{project.name}</h1><p>Construye la narrativa diapositiva por diapositiva.</p></div><div className="presentation-workspace"><aside className="slide-list">{slides.map((item, index) => <button className={`slide-thumb ${index === active ? 'is-active' : ''}`} key={item.id} onClick={() => setActive(index)}><span>{index + 1}</span><strong>{item.title || 'Sin título'}</strong></button>)}<button className="add-slide" onClick={add}><Icon name="plus" size={14} /> Añadir diapositiva</button></aside><section className="slide-editor">{slide && <><input className="slide-title-input" value={slide.title} onChange={(event) => update({ title: event.target.value })} placeholder="Título de la diapositiva" /><textarea className="slide-body-input" value={slide.body} onChange={(event) => update({ body: event.target.value })} placeholder="Contenido, notas o instrucciones" /><button className="delete-slide" onClick={remove} disabled={slides.length <= 1}><Icon name="trash" size={14} /> Eliminar diapositiva</button></>}</section></div></WorkspaceFrame>;
+}
+
+function BoardEditor({ project, onBack, onChange, onToast }: { project: Project; onBack: () => void; onChange: (project: Project) => void; onToast: (message: string) => void }) {
+  const columns = project.data?.board ?? [];
+  const addCard = (columnId: string) => { const next = columns.map((column) => column.id === columnId ? { ...column, cards: [...column.cards, { id: `card-${Date.now()}`, title: 'Nueva tarjeta', detail: 'Describe el trabajo' }] } : column); onChange({ ...project, data: { ...project.data, board: next } }); onToast('Tarjeta añadida'); };
+  const updateCard = (columnId: string, cardId: string, patch: Partial<BoardCard>) => onChange({ ...project, data: { ...project.data, board: columns.map((column) => column.id === columnId ? { ...column, cards: column.cards.map((card) => card.id === cardId ? { ...card, ...patch } : card) } : column) } });
+  return <WorkspaceFrame project={project} onBack={onBack} onExport={() => { downloadProject(project); onToast('Tablero exportado como Markdown'); }}><div className="specialized-heading"><span className="section-kicker">Tablero de trabajo</span><h1>{project.name}</h1><p>Mueve el trabajo por etapas y edita cada tarjeta.</p></div><div className="board-workspace">{columns.map((column) => <section className="board-column" key={column.id}><header><strong>{column.title}</strong><span>{column.cards.length}</span></header>{column.cards.map((card) => <article className="board-card" key={card.id}><input value={card.title} onChange={(event) => updateCard(column.id, card.id, { title: event.target.value })} /><textarea value={card.detail} onChange={(event) => updateCard(column.id, card.id, { detail: event.target.value })} rows={2} /></article>)}<button className="add-card" onClick={() => addCard(column.id)}><Icon name="plus" size={14} /> Añadir tarjeta</button></section>)}</div></WorkspaceFrame>;
+}
+
+function TimelineEditor({ project, onBack, onChange, onToast }: { project: Project; onBack: () => void; onChange: (project: Project) => void; onToast: (message: string) => void }) {
+  const items = project.data?.timeline ?? [];
+  const update = (id: string, patch: Partial<TimelineItem>) => onChange({ ...project, data: { ...project.data, timeline: items.map((item) => item.id === id ? { ...item, ...patch } : item) } });
+  const add = () => { const next = { id: `phase-${Date.now()}`, title: 'Nueva fase', date: 'Fecha', detail: 'Define el resultado de esta fase.' }; onChange({ ...project, data: { ...project.data, timeline: [...items, next] } }); onToast('Fase añadida'); };
+  return <WorkspaceFrame project={project} onBack={onBack} onExport={() => { downloadProject(project); onToast('Cronograma exportado como Markdown'); }}><div className="specialized-heading"><span className="section-kicker">Cronograma</span><h1>{project.name}</h1><p>Planifica fases, fechas, dependencias y entregables.</p></div><div className="timeline-workspace">{items.map((item, index) => <article className="timeline-item" key={item.id}><span className="timeline-index">{index + 1}</span><div><input className="timeline-date" value={item.date} onChange={(event) => update(item.id, { date: event.target.value })} /><input className="timeline-title" value={item.title} onChange={(event) => update(item.id, { title: event.target.value })} /><textarea value={item.detail} onChange={(event) => update(item.id, { detail: event.target.value })} rows={2} /></div></article>)}<button className="secondary-button" onClick={add}><Icon name="plus" size={15} /> Añadir fase</button></div></WorkspaceFrame>;
+}
+
 function Editor({ project, onBack, onChange, onToast }: { project: Project; onBack: () => void; onChange: (project: Project) => void; onToast: (message: string) => void }) {
   const [selectedNodeId, setSelectedNodeId] = useState(project.nodes[0]?.id ?? '');
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [zoom, setZoom] = useState(100);
   const type = typeFor(project.type);
   const selectedNode = project.nodes.find((node) => node.id === selectedNodeId) ?? project.nodes[0];
+
+  if (project.type === 'document') return <DocumentEditor project={project} onBack={onBack} onChange={onChange} onToast={onToast} />;
+  if (project.type === 'presentation') return <PresentationEditor project={project} onBack={onBack} onChange={onChange} onToast={onToast} />;
+  if (project.type === 'board') return <BoardEditor project={project} onBack={onBack} onChange={onChange} onToast={onToast} />;
+  if (project.type === 'timeline') return <TimelineEditor project={project} onBack={onBack} onChange={onChange} onToast={onToast} />;
 
   const updateNode = (patch: Partial<DiagramNode>) => {
     if (!selectedNode) return;
