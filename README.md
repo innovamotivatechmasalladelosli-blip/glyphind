@@ -2,7 +2,7 @@
 
 Glyphind es un espacio local-first para crear y ordenar proyectos de diagramas. La interfaz está inspirada en una biblioteca de proyectos limpia y silenciosa, con editor de lienzo, tipos extensibles y acciones rápidas.
 
-La aplicación publicada está disponible en [Glyphind en GitHub Pages](https://innovamotivatechmasalladelosli-blip.github.io/glyphind/). Cada cambio en `main` recompila y actualiza esa versión pública automáticamente.
+La aplicación publicada está disponible en [Glyphind en GitHub Pages](https://innovamotivatechmasalladelosli-blip.github.io/glyphind/). La versión pública se sirve desde la compilación estática incluida en `main`.
 
 ## Principios
 
