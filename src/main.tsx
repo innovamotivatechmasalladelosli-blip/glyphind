@@ -16,7 +16,7 @@ type DiagramNode = {
   tone: string;
 };
 
-type Slide = { id: string; title: string; body: string };
+type Slide = { id: string; title: string; body: string; diagramProjectId?: string };
 type BoardCard = { id: string; title: string; detail: string };
 type BoardColumn = { id: string; title: string; cards: BoardCard[] };
 type TimelineItem = { id: string; title: string; date: string; detail: string };
@@ -196,22 +196,42 @@ function formatDate(timestamp: number) {
   return `Hace ${days} días`;
 }
 
-function initialData(type: string): ProjectData {
+function diagramSlideFor(project: Project): Slide {
+  const type = typeFor(project.type);
+  const elements = project.nodes.slice(0, 8).map((node, index) => `${index + 1}. ${node.label} — ${node.detail}`).join('\n');
+  return {
+    id: `diagram-${project.id}`,
+    title: project.name,
+    body: `${type.label}\n\n${elements || 'Diagrama listo para presentar.'}`,
+    diagramProjectId: project.id,
+  };
+}
+
+function presentationSlidesFor(projects: Project[]) {
+  return projects.filter((project) => project.type !== 'presentation').map(diagramSlideFor);
+}
+
+function syncPresentationSlides(slides: Slide[], projects: Project[]) {
+  const manualSlides = slides.filter((slide) => !slide.diagramProjectId);
+  return [...manualSlides, ...presentationSlidesFor(projects)];
+}
+
+function initialData(type: string, relatedProjects: Project[] = []): ProjectData {
   if (type === 'document') return { document: '# Documento nuevo\n\nEscribe aquí el contenido de tu documento.\n\n## Próximos pasos\n- Añade el contexto\n- Revisa el contenido\n- Comparte la versión final' };
-  if (type === 'presentation') return { slides: [{ id: `slide-${Date.now()}`, title: 'Título de la presentación', body: 'Escribe la idea principal de esta diapositiva.' }] };
+  if (type === 'presentation') return { slides: [{ id: `slide-${Date.now()}`, title: 'Título de la presentación', body: 'Escribe la idea principal de esta diapositiva.' }, ...presentationSlidesFor(relatedProjects)] };
   if (type === 'board') return { board: [{ id: 'backlog', title: 'Entrada', cards: [{ id: `card-${Date.now()}`, title: 'Primera tarjeta', detail: 'Describe el trabajo pendiente' }] }, { id: 'progress', title: 'En progreso', cards: [] }, { id: 'review', title: 'Revisión', cards: [] }, { id: 'done', title: 'Hecho', cards: [] }] };
   if (type === 'timeline') return { timeline: [{ id: `phase-${Date.now()}`, title: 'Definir alcance', date: 'Semana 1', detail: 'Alinear objetivos, responsables y entregables.' }, { id: `phase-${Date.now()}-2`, title: 'Construir primera versión', date: 'Semana 2', detail: 'Ejecutar las tareas prioritarias.' }] };
   return {};
 }
 
-function createProject(name: string, type: string): Project {
+function createProject(name: string, type: string, relatedProjects: Project[] = []): Project {
   return {
     id: `project-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     name: name.trim() || 'Proyecto sin título',
     type,
     updated: Date.now(),
     nodes: defaultNodes[type]?.map((node) => ({ ...node, id: `${node.id}-${Date.now()}` })) ?? defaultNodes.flow,
-    data: initialData(type),
+    data: initialData(type, relatedProjects),
   };
 }
 
@@ -242,15 +262,15 @@ function sourceLines(source: string) {
   return source.split(/\r?\n/).map((line) => line.replace(/^\s*[-*•\d.)]+\s*/, '').trim()).filter(Boolean);
 }
 
-function organizeSource(name: string, type: string, source: string): Project {
+function organizeSource(name: string, type: string, source: string, relatedProjects: Project[] = []): Project {
   const lines = sourceLines(source);
   const title = name.trim() || lines[0] || 'Flujo organizado';
   const items = lines.length > 1 ? lines.slice(1) : lines;
-  const project = createProject(title, type);
+  const project = createProject(title, type, relatedProjects);
   const tones = ['blue', 'lilac', 'orange', 'green'] as const;
   const nodes = (labels: string[]) => labels.slice(0, 12).map((label, index) => ({ id: `organized-${Date.now()}-${index}`, label: label.slice(0, 70), detail: index === 0 ? 'Punto de partida' : `Elemento ${index + 1}`, x: 10 + (index % 4) * 25, y: 18 + Math.floor(index / 4) * 30, tone: tones[index % tones.length] }));
   if (type === 'document') project.data = { document: `# ${title}\n\n${source.trim()}` };
-  else if (type === 'presentation') project.data = { slides: (items.length ? items : [title]).slice(0, 12).map((item, index) => ({ id: `slide-${Date.now()}-${index}`, title: index === 0 ? title : item, body: index === 0 ? source.trim() : `Desarrolla aquí la idea: ${item}` })) };
+  else if (type === 'presentation') project.data = { slides: [...(items.length ? items : [title]).slice(0, 12).map((item, index) => ({ id: `slide-${Date.now()}-${index}`, title: index === 0 ? title : item, body: index === 0 ? source.trim() : `Desarrolla aquí la idea: ${item}` })), ...presentationSlidesFor(relatedProjects)] };
   else if (type === 'board') project.data = { board: [{ id: 'backlog', title: 'Entrada', cards: items.slice(0, 5).map((item, index) => ({ id: `card-${Date.now()}-${index}`, title: item, detail: 'Pendiente de organizar' })) }, { id: 'progress', title: 'En progreso', cards: [] }, { id: 'review', title: 'Revisión', cards: [] }, { id: 'done', title: 'Hecho', cards: [] }] };
   else if (type === 'timeline') project.data = { timeline: (items.length ? items : [title]).slice(0, 12).map((item, index) => ({ id: `phase-${Date.now()}-${index}`, title: item, date: `Fase ${index + 1}`, detail: 'Define responsable, dependencia y entregable.' })) };
   else project.nodes = nodes(items.length ? items : [title]);
@@ -310,7 +330,7 @@ function App() {
   const submitProject = (event: FormEvent) => {
     event.preventDefault();
     if (modal === 'new') {
-      const project = createProject(draftName, draftType);
+      const project = createProject(draftName, draftType, draftType === 'presentation' ? projects : []);
       setProjects((current) => [project, ...current]);
       setModal(null);
       setToast('Proyecto creado y guardado localmente');
@@ -360,7 +380,7 @@ function App() {
   };
 
   const createOrganizedProject = (name: string, type: string, source: string) => {
-    const project = organizeSource(name, type, source);
+    const project = organizeSource(name, type, source, type === 'presentation' ? projects : []);
     setProjects((current) => [project, ...current]);
     setOrganizerOpen(false);
     openProject(project);
@@ -376,9 +396,10 @@ function App() {
 
   if (activeView === 'editor' && activeProject) {
     return (
-      <Editor
-        project={activeProject}
-        onBack={() => setActiveView('projects')}
+        <Editor
+          project={activeProject}
+          allProjects={projects}
+          onBack={() => setActiveView('projects')}
         onChange={(nextProject) => updateProject(nextProject.id, nextProject)}
         onToast={setToast}
       />
@@ -502,14 +523,32 @@ function DocumentEditor({ project, onBack, onChange, onToast }: { project: Proje
   return <WorkspaceFrame project={project} onBack={onBack} onExport={() => { downloadProject(project); onToast('Documento exportado como Markdown'); }}><div className="specialized-heading"><span className="section-kicker">Editor de documento</span><h1>{project.name}</h1><p>Redacta, estructura y revisa el contenido directamente.</p></div><div className="document-workspace"><textarea className="document-textarea" value={content} onChange={(event) => onChange({ ...project, data: { ...project.data, document: event.target.value } })} spellCheck /></div><div className="specialized-foot">{content.split(/\s+/).filter(Boolean).length} palabras · cambios guardados automáticamente</div></WorkspaceFrame>;
 }
 
-function PresentationEditor({ project, onBack, onChange, onToast }: { project: Project; onBack: () => void; onChange: (project: Project) => void; onToast: (message: string) => void }) {
+function DiagramSlidePreview({ project }: { project: Project }) {
+  const type = typeFor(project.type);
+  return <div className="diagram-slide-preview"><div className="diagram-slide-preview-head"><span className="project-type-icon" style={{ color: type.color, backgroundColor: type.soft }}><Icon name={type.icon} size={17} /></span><div><strong>{project.name}</strong><small>{type.label} · {project.nodes.length} elementos</small></div></div><div className="diagram-preview-map">{project.nodes.slice(0, 8).map((node) => <span className={`diagram-preview-node node-${node.tone}`} key={node.id}>{node.label}</span>)}</div></div>;
+}
+
+function PresentationEditor({ project, allProjects, onBack, onChange, onToast }: { project: Project; allProjects: Project[]; onBack: () => void; onChange: (project: Project) => void; onToast: (message: string) => void }) {
   const slides = project.data?.slides ?? [];
+  const diagramProjects = allProjects.filter((item) => item.id !== project.id && item.type !== 'presentation');
   const [active, setActive] = useState(0);
   const slide = slides[active] ?? slides[0];
+  useEffect(() => {
+    const syncedSlides = syncPresentationSlides(slides, diagramProjects);
+    const changed = syncedSlides.length !== slides.length || syncedSlides.some((item, index) => item.id !== slides[index]?.id);
+    if (changed) onChange({ ...project, data: { ...project.data, slides: syncedSlides } });
+  }, [project.id]);
   const update = (patch: Partial<Slide>) => slide && onChange({ ...project, data: { ...project.data, slides: slides.map((item, index) => index === active ? { ...item, ...patch } : item) } });
   const add = () => { const next = { id: `slide-${Date.now()}`, title: 'Nueva diapositiva', body: 'Añade el contenido de esta diapositiva.' }; onChange({ ...project, data: { ...project.data, slides: [...slides, next] } }); setActive(slides.length); onToast('Diapositiva añadida'); };
   const remove = () => { if (slides.length <= 1) return; const next = slides.filter((_, index) => index !== active); onChange({ ...project, data: { ...project.data, slides: next } }); setActive(Math.max(0, active - 1)); };
-  return <WorkspaceFrame project={project} onBack={onBack} onExport={() => { downloadProject(project); onToast('Presentación exportada como Markdown'); }}><div className="specialized-heading"><span className="section-kicker">Editor de presentación</span><h1>{project.name}</h1><p>Construye la narrativa diapositiva por diapositiva.</p></div><div className="presentation-workspace"><aside className="slide-list">{slides.map((item, index) => <button className={`slide-thumb ${index === active ? 'is-active' : ''}`} key={item.id} onClick={() => setActive(index)}><span>{index + 1}</span><strong>{item.title || 'Sin título'}</strong></button>)}<button className="add-slide" onClick={add}><Icon name="plus" size={14} /> Añadir diapositiva</button></aside><section className="slide-editor">{slide && <><input className="slide-title-input" value={slide.title} onChange={(event) => update({ title: event.target.value })} placeholder="Título de la diapositiva" /><textarea className="slide-body-input" value={slide.body} onChange={(event) => update({ body: event.target.value })} placeholder="Contenido, notas o instrucciones" /><button className="delete-slide" onClick={remove} disabled={slides.length <= 1}><Icon name="trash" size={14} /> Eliminar diapositiva</button></>}</section></div></WorkspaceFrame>;
+  const refreshDiagrams = () => {
+    const syncedSlides = syncPresentationSlides(slides, diagramProjects);
+    onChange({ ...project, data: { ...project.data, slides: syncedSlides } });
+    setActive(Math.min(active, Math.max(0, syncedSlides.length - 1)));
+    onToast(`${diagramProjects.length} diagramas incluidos en la presentación`);
+  };
+  const linkedProject = slide?.diagramProjectId ? allProjects.find((item) => item.id === slide.diagramProjectId) : undefined;
+  return <WorkspaceFrame project={project} onBack={onBack} onExport={() => { downloadProject(project); onToast('Presentación exportada como Markdown'); }}><div className="specialized-heading"><div><span className="section-kicker">Editor de presentación</span><h1>{project.name}</h1><p>Construye la narrativa y presenta todos los diagramas de tu espacio.</p></div><button className="secondary-button" onClick={refreshDiagrams}><Icon name="grid" size={15} /> Actualizar diagramas</button></div><div className="presentation-workspace"><aside className="slide-list"><div className="slide-list-heading"><span>Diapositivas</span><small>{diagramProjects.length} diagramas</small></div>{slides.map((item, index) => <button className={`slide-thumb ${index === active ? 'is-active' : ''} ${item.diagramProjectId ? 'is-diagram' : ''}`} key={item.id} onClick={() => setActive(index)}><span>{index + 1}</span><strong>{item.title || 'Sin título'}</strong>{item.diagramProjectId && <em>Diagrama</em>}</button>)}<button className="add-slide" onClick={add}><Icon name="plus" size={14} /> Añadir diapositiva</button></aside><section className="slide-editor">{slide && <><div className="slide-editor-toolbar"><span>{linkedProject ? 'Diagrama incluido' : 'Contenido editable'}</span><span>{active + 1} / {slides.length}</span></div>{linkedProject && <DiagramSlidePreview project={linkedProject} />}<input className="slide-title-input" value={slide.title} onChange={(event) => update({ title: event.target.value })} placeholder="Título de la diapositiva" /><textarea className="slide-body-input" value={slide.body} onChange={(event) => update({ body: event.target.value })} placeholder="Contenido, notas o instrucciones" /><button className="delete-slide" onClick={remove} disabled={slides.length <= 1}><Icon name="trash" size={14} /> Eliminar diapositiva</button></>}</section></div></WorkspaceFrame>;
 }
 
 function BoardEditor({ project, onBack, onChange, onToast }: { project: Project; onBack: () => void; onChange: (project: Project) => void; onToast: (message: string) => void }) {
@@ -526,7 +565,7 @@ function TimelineEditor({ project, onBack, onChange, onToast }: { project: Proje
   return <WorkspaceFrame project={project} onBack={onBack} onExport={() => { downloadProject(project); onToast('Cronograma exportado como Markdown'); }}><div className="specialized-heading"><span className="section-kicker">Cronograma</span><h1>{project.name}</h1><p>Planifica fases, fechas, dependencias y entregables.</p></div><div className="timeline-workspace">{items.map((item, index) => <article className="timeline-item" key={item.id}><span className="timeline-index">{index + 1}</span><div><input className="timeline-date" value={item.date} onChange={(event) => update(item.id, { date: event.target.value })} /><input className="timeline-title" value={item.title} onChange={(event) => update(item.id, { title: event.target.value })} /><textarea value={item.detail} onChange={(event) => update(item.id, { detail: event.target.value })} rows={2} /></div></article>)}<button className="secondary-button" onClick={add}><Icon name="plus" size={15} /> Añadir fase</button></div></WorkspaceFrame>;
 }
 
-function Editor({ project, onBack, onChange, onToast }: { project: Project; onBack: () => void; onChange: (project: Project) => void; onToast: (message: string) => void }) {
+function Editor({ project, allProjects, onBack, onChange, onToast }: { project: Project; allProjects: Project[]; onBack: () => void; onChange: (project: Project) => void; onToast: (message: string) => void }) {
   const [selectedNodeId, setSelectedNodeId] = useState(project.nodes[0]?.id ?? '');
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [zoom, setZoom] = useState(100);
@@ -534,7 +573,7 @@ function Editor({ project, onBack, onChange, onToast }: { project: Project; onBa
   const selectedNode = project.nodes.find((node) => node.id === selectedNodeId) ?? project.nodes[0];
 
   if (project.type === 'document') return <DocumentEditor project={project} onBack={onBack} onChange={onChange} onToast={onToast} />;
-  if (project.type === 'presentation') return <PresentationEditor project={project} onBack={onBack} onChange={onChange} onToast={onToast} />;
+  if (project.type === 'presentation') return <PresentationEditor project={project} allProjects={allProjects} onBack={onBack} onChange={onChange} onToast={onToast} />;
   if (project.type === 'board') return <BoardEditor project={project} onBack={onBack} onChange={onChange} onToast={onToast} />;
   if (project.type === 'timeline') return <TimelineEditor project={project} onBack={onBack} onChange={onChange} onToast={onToast} />;
 
