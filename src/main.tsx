@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { StrictMode, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
 
@@ -56,7 +56,7 @@ const diagramTypes: DiagramType[] = [
   { id: 'community', label: 'Comunidad', description: 'Relaciones, grupos y conexiones', icon: 'community', color: '#a45dbd', soft: '#f7eafa' },
 ];
 
-const availableDiagramTypes = diagramTypes.filter((type) => type.id !== 'team' && type.id !== 'community');
+const availableDiagramTypes = diagramTypes;
 
 const defaultNodes: Record<string, DiagramNode[]> = {
   flow: [
@@ -125,14 +125,6 @@ const defaultNodes: Record<string, DiagramNode[]> = {
   ],
 };
 
-const seedProjects: Project[] = [
-  { id: 'project-1', name: 'Lanzamiento de producto', type: 'flow', updated: Date.now() - 1000 * 60 * 18, nodes: defaultNodes.flow },
-  { id: 'project-2', name: 'Mapa del equipo', type: 'team', updated: Date.now() - 1000 * 60 * 60 * 3, nodes: defaultNodes.team },
-  { id: 'project-3', name: 'Comunidad Glyphind', type: 'community', updated: Date.now() - 1000 * 60 * 60 * 22, nodes: defaultNodes.community },
-  { id: 'project-4', name: 'Plan semanal', type: 'tasks', updated: Date.now() - 1000 * 60 * 60 * 31, nodes: defaultNodes.tasks },
-  { id: 'project-5', name: 'Ideas para el futuro', type: 'mindmap', updated: Date.now() - 1000 * 60 * 60 * 46, nodes: defaultNodes.mindmap },
-];
-
 function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
   const paths: Record<IconName, string> = {
     menu: 'M4 6h16M4 12h16M4 18h16',
@@ -193,6 +185,11 @@ function formatDate(timestamp: number) {
   const days = Math.round(hours / 24);
   if (days === 1) return 'Ayer';
   return `Hace ${days} días`;
+}
+
+function connectorPath(from: DiagramNode, to: DiagramNode) {
+  const middleX = (from.x + to.x) / 2;
+  return `M${from.x} ${from.y} C${middleX} ${from.y}, ${middleX} ${to.y}, ${to.x} ${to.y}`;
 }
 
 function diagramSlideFor(project: Project): Slide {
@@ -256,14 +253,26 @@ function downloadProject(project: Project) {
   URL.revokeObjectURL(url);
 }
 
+function downloadWorkspace(projects: Project[]) {
+  const blob = new Blob([JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), projects }, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `glyphind-respaldo-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 
 function App() {
   const [projects, setProjects] = useState<Project[]>(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
-      return stored ? JSON.parse(stored) as Project[] : seedProjects;
+      return stored ? JSON.parse(stored) as Project[] : [];
     } catch {
-      return seedProjects;
+      return [];
     }
   });
   const [activeView, setActiveView] = useState<'projects' | 'editor'>('projects');
@@ -277,6 +286,7 @@ function App() {
   const [draftType, setDraftType] = useState('flow');
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [toast, setToast] = useState('');
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
@@ -365,6 +375,27 @@ function App() {
     setToast('Proyecto eliminado del dispositivo');
   };
 
+  const importWorkspace = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(String(reader.result));
+        const imported = Array.isArray(parsed) ? parsed : parsed.projects;
+        if (!Array.isArray(imported) || imported.some((item) => !item?.id || !item?.name || !item?.type || !Array.isArray(item?.nodes))) throw new Error('Formato inválido');
+        setProjects(imported as Project[]);
+        setFilter('all');
+        setSearch('');
+        setToast(`${imported.length} proyectos restaurados`);
+      } catch {
+        setToast('No se pudo importar el respaldo');
+      }
+    };
+    reader.readAsText(file);
+  };
+
   if (activeView === 'editor' && activeProject) {
     return (
         <Editor
@@ -387,11 +418,13 @@ function App() {
         <div className="sidebar-rule" />
         <nav className="sidebar-nav" aria-label="Navegación principal">
           <p className="nav-label">Espacio de trabajo</p>
-          <button className="nav-item is-active" onClick={() => { setActiveView('projects'); setMobileMenu(false); }}><Icon name="grid" /><span>Todos los proyectos</span><strong>{projects.length}</strong></button>
-          <button className="nav-item" onClick={() => { setFilter('flow'); setMobileMenu(false); }}><Icon name="flow" /><span>Flujos</span></button>
-          <button className="nav-item" onClick={() => { setFilter('tasks'); setMobileMenu(false); }}><Icon name="checklist" /><span>Pendientes</span></button>
+          <button className={`nav-item ${filter === 'all' ? 'is-active' : ''}`} onClick={() => { setActiveView('projects'); setFilter('all'); setMobileMenu(false); }}><Icon name="grid" /><span>Todos los proyectos</span><strong>{projects.length}</strong></button>
+          <div className="nav-scroll">
+            {availableDiagramTypes.map((item) => <button className={`nav-item ${filter === item.id ? 'is-active' : ''}`} key={item.id} onClick={() => { setActiveView('projects'); setFilter(item.id); setMobileMenu(false); }}><Icon name={item.icon} /><span>{item.label}</span><strong>{projects.filter((project) => project.type === item.id).length || ''}</strong></button>)}
+          </div>
         </nav>
         <div className="sidebar-bottom">
+          <div className="workspace-actions"><button className="sidebar-action" onClick={() => downloadWorkspace(projects)}><Icon name="arrow" size={14} /> Exportar respaldo</button><button className="sidebar-action" onClick={() => importInputRef.current?.click()}><Icon name="folder" size={14} /> Importar respaldo</button><input ref={importInputRef} type="file" accept="application/json,.json" hidden onChange={importWorkspace} /></div>
           <div className="sidebar-footnote"><span>G</span><span>Glyphind <em>0.1</em></span></div>
         </div>
       </aside>
@@ -433,7 +466,7 @@ function App() {
                 })}
               </div>
             ) : (
-              <div className="empty-state"><span className="empty-icon"><Icon name="search" size={26} /></span><h3>No encontramos ese proyecto</h3><p>Prueba otra búsqueda o limpia los filtros para volver a ver tus proyectos.</p><button className="secondary-button" onClick={() => { setSearch(''); setFilter('all'); }}>Limpiar filtros</button></div>
+              <div className="empty-state"><span className="empty-icon"><Icon name={projects.length === 0 ? 'plus' : 'search'} size={26} /></span><h3>{projects.length === 0 ? 'Tu espacio está listo' : 'No encontramos ese proyecto'}</h3><p>{projects.length === 0 ? 'Crea tu primer proyecto para empezar a organizar ideas, tareas y procesos.' : 'Prueba otra búsqueda o limpia los filtros para volver a ver tus proyectos.'}</p><button className="secondary-button" onClick={projects.length === 0 ? openNewModal : () => { setSearch(''); setFilter('all'); }}>{projects.length === 0 ? 'Crear primer proyecto' : 'Limpiar filtros'}</button></div>
             )}
           </section>
 
@@ -503,14 +536,17 @@ function BoardEditor({ project, onBack, onChange, onToast }: { project: Project;
   const columns = project.data?.board ?? [];
   const addCard = (columnId: string) => { const next = columns.map((column) => column.id === columnId ? { ...column, cards: [...column.cards, { id: `card-${Date.now()}`, title: 'Nueva tarjeta', detail: 'Describe el trabajo' }] } : column); onChange({ ...project, data: { ...project.data, board: next } }); onToast('Tarjeta añadida'); };
   const updateCard = (columnId: string, cardId: string, patch: Partial<BoardCard>) => onChange({ ...project, data: { ...project.data, board: columns.map((column) => column.id === columnId ? { ...column, cards: column.cards.map((card) => card.id === cardId ? { ...card, ...patch } : card) } : column) } });
-  return <WorkspaceFrame project={project} onBack={onBack} onExport={() => { downloadProject(project); onToast('Tablero exportado como Markdown'); }}><div className="specialized-heading"><span className="section-kicker">Tablero de trabajo</span><h1>{project.name}</h1><p>Mueve el trabajo por etapas y edita cada tarjeta.</p></div><div className="board-workspace">{columns.map((column) => <section className="board-column" key={column.id}><header><strong>{column.title}</strong><span>{column.cards.length}</span></header>{column.cards.map((card) => <article className="board-card" key={card.id}><input value={card.title} onChange={(event) => updateCard(column.id, card.id, { title: event.target.value })} /><textarea value={card.detail} onChange={(event) => updateCard(column.id, card.id, { detail: event.target.value })} rows={2} /></article>)}<button className="add-card" onClick={() => addCard(column.id)}><Icon name="plus" size={14} /> Añadir tarjeta</button></section>)}</div></WorkspaceFrame>;
+  const moveCard = (columnId: string, cardId: string) => { const index = columns.findIndex((column) => column.id === columnId); if (index < 0 || index === columns.length - 1) return; const source = columns[index]; const card = source.cards.find((item) => item.id === cardId); if (!card) return; const next = columns.map((column, columnIndex) => columnIndex === index ? { ...column, cards: column.cards.filter((item) => item.id !== cardId) } : columnIndex === index + 1 ? { ...column, cards: [...column.cards, card] } : column); onChange({ ...project, data: { ...project.data, board: next } }); onToast('Tarjeta movida a la siguiente etapa'); };
+  const removeCard = (columnId: string, cardId: string) => { const next = columns.map((column) => column.id === columnId ? { ...column, cards: column.cards.filter((card) => card.id !== cardId) } : column); onChange({ ...project, data: { ...project.data, board: next } }); onToast('Tarjeta eliminada'); };
+  return <WorkspaceFrame project={project} onBack={onBack} onExport={() => { downloadProject(project); onToast('Tablero exportado como Markdown'); }}><div className="specialized-heading"><span className="section-kicker">Tablero de trabajo</span><h1>{project.name}</h1><p>Mueve el trabajo por etapas y edita cada tarjeta.</p></div><div className="board-workspace">{columns.map((column, columnIndex) => <section className="board-column" key={column.id}><header><strong>{column.title}</strong><span>{column.cards.length}</span></header>{column.cards.map((card) => <article className="board-card" key={card.id}><input value={card.title} onChange={(event) => updateCard(column.id, card.id, { title: event.target.value })} /><textarea value={card.detail} onChange={(event) => updateCard(column.id, card.id, { detail: event.target.value })} rows={2} /><div className="card-actions"><button onClick={() => moveCard(column.id, card.id)} disabled={columnIndex === columns.length - 1}><Icon name="arrow" size={13} /> Siguiente</button><button className="danger-action" onClick={() => removeCard(column.id, card.id)}><Icon name="trash" size={13} /> Eliminar</button></div></article>)}<button className="add-card" onClick={() => addCard(column.id)}><Icon name="plus" size={14} /> Añadir tarjeta</button></section>)}</div></WorkspaceFrame>;
 }
 
 function TimelineEditor({ project, onBack, onChange, onToast }: { project: Project; onBack: () => void; onChange: (project: Project) => void; onToast: (message: string) => void }) {
   const items = project.data?.timeline ?? [];
   const update = (id: string, patch: Partial<TimelineItem>) => onChange({ ...project, data: { ...project.data, timeline: items.map((item) => item.id === id ? { ...item, ...patch } : item) } });
   const add = () => { const next = { id: `phase-${Date.now()}`, title: 'Nueva fase', date: 'Fecha', detail: 'Define el resultado de esta fase.' }; onChange({ ...project, data: { ...project.data, timeline: [...items, next] } }); onToast('Fase añadida'); };
-  return <WorkspaceFrame project={project} onBack={onBack} onExport={() => { downloadProject(project); onToast('Cronograma exportado como Markdown'); }}><div className="specialized-heading"><span className="section-kicker">Cronograma</span><h1>{project.name}</h1><p>Planifica fases, fechas, dependencias y entregables.</p></div><div className="timeline-workspace">{items.map((item, index) => <article className="timeline-item" key={item.id}><span className="timeline-index">{index + 1}</span><div><input className="timeline-date" value={item.date} onChange={(event) => update(item.id, { date: event.target.value })} /><input className="timeline-title" value={item.title} onChange={(event) => update(item.id, { title: event.target.value })} /><textarea value={item.detail} onChange={(event) => update(item.id, { detail: event.target.value })} rows={2} /></div></article>)}<button className="secondary-button" onClick={add}><Icon name="plus" size={15} /> Añadir fase</button></div></WorkspaceFrame>;
+  const remove = (id: string) => { if (items.length <= 1) return; onChange({ ...project, data: { ...project.data, timeline: items.filter((item) => item.id !== id) } }); onToast('Fase eliminada'); };
+  return <WorkspaceFrame project={project} onBack={onBack} onExport={() => { downloadProject(project); onToast('Cronograma exportado como Markdown'); }}><div className="specialized-heading"><span className="section-kicker">Cronograma</span><h1>{project.name}</h1><p>Planifica fases, fechas, dependencias y entregables.</p></div><div className="timeline-workspace">{items.map((item, index) => <article className="timeline-item" key={item.id}><span className="timeline-index">{index + 1}</span><div><input className="timeline-date" value={item.date} onChange={(event) => update(item.id, { date: event.target.value })} /><input className="timeline-title" value={item.title} onChange={(event) => update(item.id, { title: event.target.value })} /><textarea value={item.detail} onChange={(event) => update(item.id, { detail: event.target.value })} rows={2} /><button className="delete-slide" onClick={() => remove(item.id)} disabled={items.length <= 1}><Icon name="trash" size={14} /> Eliminar fase</button></div></article>)}<button className="secondary-button" onClick={add}><Icon name="plus" size={15} /> Añadir fase</button></div></WorkspaceFrame>;
 }
 
 function Editor({ project, allProjects, onBack, onChange, onToast }: { project: Project; allProjects: Project[]; onBack: () => void; onChange: (project: Project) => void; onToast: (message: string) => void }) {
@@ -567,7 +603,7 @@ function Editor({ project, allProjects, onBack, onChange, onToast }: { project: 
   return (
     <div className="editor-shell">
       <header className="editor-topbar"><button className="back-link" onClick={onBack}><Icon name="back" size={17} /> Volver a proyectos</button><div className="editor-breadcrumb"><span>/</span><span>{project.name}</span><span className="editor-type-pill" style={{ color: type.color, backgroundColor: type.soft }}><Icon name={type.icon} size={13} /> {type.label}</span></div><div className="editor-actions"><span className="saved-label"><span className="canvas-live-dot" /> Guardado local</span></div></header>
-      <main className="editor-main"><div className="editor-heading"><div><span className="section-kicker">Editor de diagrama</span><h1>{project.name}</h1><p>{type.description}. Cambia, elimina o añade elementos para construir tu flujo.</p></div><button className="secondary-button" onClick={() => { downloadProject(project); onToast('Flujo exportado como Markdown'); }}><Icon name="arrow" size={15} /> Exportar</button></div><div className={`editor-workspace ${inspectorOpen ? '' : 'inspector-is-closed'}`}><aside className="canvas-tools"><span className="tool-label">Herramientas</span><button className="tool-button is-active" title="Seleccionar"><Icon name="command" /></button><button className="tool-button" title="Añadir elemento" onClick={addNode}><Icon name="add" /></button><div className="tools-line" /><span className="tool-label">Vista</span><button className="tool-button" title="Ajustar lienzo" onClick={fitCanvas}><Icon name="grid" /></button><button className="zoom-value zoom-button" title="Cambiar zoom" onClick={cycleZoom}>{zoom}%</button></aside><section className="canvas-section"><div className="canvas-header"><span><span className="canvas-live-dot" /> Lienzo de trabajo</span><span className="canvas-help">Selecciona un elemento para editarlo</span>{!inspectorOpen && <button className="reopen-inspector" onClick={() => setInspectorOpen(true)}>Mostrar inspector <Icon name="arrow" size={13} /></button>}</div><div className="diagram-canvas" onClick={() => setSelectedNodeId('')}><div className="canvas-zoom-layer" style={{ transform: `scale(${zoom / 100})` }}><svg className="canvas-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path d="M22 48 C30 48, 30 35, 39 35 M55 36 C64 36, 64 50, 68 50 M77 59 C81 63, 82 66, 83 72" /></svg>{project.nodes.map((node) => <button key={node.id} className={`diagram-node node-${node.tone} ${selectedNode?.id === node.id ? 'is-selected' : ''}`} style={{ left: `${node.x}%`, top: `${node.y}%` }} onClick={(event) => { event.stopPropagation(); setSelectedNodeId(node.id); }}><span className="node-grip"><i /><i /><i /></span><strong>{node.label}</strong><small>{node.detail}</small></button>)}</div></div><div className="canvas-footer"><span>{project.nodes.length} elementos</span><span><kbd>⌘</kbd> + <kbd>K</kbd> para comandos</span></div></section>{inspectorOpen && <aside className="properties-panel"><div className="properties-head"><div><span className="section-kicker">Inspector</span><h2>Propiedades</h2></div><button className="icon-button" aria-label="Cerrar inspector" onClick={() => setInspectorOpen(false)}><Icon name="close" size={16} /></button></div>{selectedNode ? <div className="properties-content"><div className="selected-preview" style={{ backgroundColor: type.soft, color: type.color }}><Icon name={type.icon} size={21} /><span>{type.label}</span></div><label className="field-label">Título<input value={selectedNode.label} onChange={(event) => updateNode({ label: event.target.value })} /></label><label className="field-label">Descripción<textarea value={selectedNode.detail} onChange={(event) => updateNode({ detail: event.target.value })} rows={4} /></label><div className="property-meta"><span>ID del elemento</span><code>{selectedNode.id.slice(0, 12)}</code></div><button className="delete-element" onClick={deleteNode} disabled={project.nodes.length <= 1}><Icon name="trash" size={15} /> Eliminar elemento</button></div> : <div className="properties-empty"><span><Icon name="command" size={23} /></span><p>Selecciona un elemento del lienzo para editar sus propiedades.</p></div>}<button className="add-element-button" onClick={addNode}><Icon name="plus" size={15} /> Añadir elemento</button></aside>}</div></main>
+          <main className="editor-main"><div className="editor-heading"><div><span className="section-kicker">Editor de diagrama</span><h1>{project.name}</h1><p>{type.description}. Cambia, elimina o añade elementos para construir tu flujo.</p></div><button className="secondary-button" onClick={() => { downloadProject(project); onToast('Flujo exportado como Markdown'); }}><Icon name="arrow" size={15} /> Exportar</button></div><div className={`editor-workspace ${inspectorOpen ? '' : 'inspector-is-closed'}`}><aside className="canvas-tools"><span className="tool-label">Herramientas</span><button className="tool-button is-active" title="Seleccionar"><Icon name="command" /></button><button className="tool-button" title="Añadir elemento" onClick={addNode}><Icon name="add" /></button><div className="tools-line" /><span className="tool-label">Vista</span><button className="tool-button" title="Ajustar lienzo" onClick={fitCanvas}><Icon name="grid" /></button><button className="zoom-value zoom-button" title="Cambiar zoom" onClick={cycleZoom}>{zoom}%</button></aside><section className="canvas-section"><div className="canvas-header"><span><span className="canvas-live-dot" /> Lienzo de trabajo</span><span className="canvas-help">Selecciona un elemento para editarlo</span>{!inspectorOpen && <button className="reopen-inspector" onClick={() => setInspectorOpen(true)}>Mostrar inspector <Icon name="arrow" size={13} /></button>}</div><div className="diagram-canvas" onClick={() => setSelectedNodeId('')}><div className="canvas-zoom-layer" style={{ transform: `scale(${zoom / 100})` }}><svg className="canvas-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">{project.nodes.slice(0, -1).map((node, index) => <path key={`${node.id}-${project.nodes[index + 1].id}`} d={connectorPath(node, project.nodes[index + 1])} />)}</svg>{project.nodes.map((node) => <button key={node.id} className={`diagram-node node-${node.tone} ${selectedNode?.id === node.id ? 'is-selected' : ''}`} style={{ left: `${node.x}%`, top: `${node.y}%` }} onClick={(event) => { event.stopPropagation(); setSelectedNodeId(node.id); }}><span className="node-grip"><i /><i /><i /></span><strong>{node.label}</strong><small>{node.detail}</small></button>)}</div></div><div className="canvas-footer"><span>{project.nodes.length} elementos</span><span><kbd>⌘</kbd> + <kbd>K</kbd> para comandos</span></div></section>{inspectorOpen && <aside className="properties-panel"><div className="properties-head"><div><span className="section-kicker">Inspector</span><h2>Propiedades</h2></div><button className="icon-button" aria-label="Cerrar inspector" onClick={() => setInspectorOpen(false)}><Icon name="close" size={16} /></button></div>{selectedNode ? <div className="properties-content"><div className="selected-preview" style={{ backgroundColor: type.soft, color: type.color }}><Icon name={type.icon} size={21} /><span>{type.label}</span></div><label className="field-label">Título<input value={selectedNode.label} onChange={(event) => updateNode({ label: event.target.value })} /></label><label className="field-label">Descripción<textarea value={selectedNode.detail} onChange={(event) => updateNode({ detail: event.target.value })} rows={4} /></label><div className="property-meta"><span>ID del elemento</span><code>{selectedNode.id.slice(0, 12)}</code></div><button className="delete-element" onClick={deleteNode} disabled={project.nodes.length <= 1}><Icon name="trash" size={15} /> Eliminar elemento</button></div> : <div className="properties-empty"><span><Icon name="command" size={23} /></span><p>Selecciona un elemento del lienzo para editar sus propiedades.</p></div>}<button className="add-element-button" onClick={addNode}><Icon name="plus" size={15} /> Añadir elemento</button></aside>}</div></main>
     </div>
   );
 }
