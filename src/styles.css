@@ -230,6 +230,9 @@ kbd { padding: 2px 4px; border: 1px solid #dcdad2; border-radius: 3px; color: #8
 .property-meta code { color: #7d7c74; }
 .delete-element { display: flex; align-items: center; gap: 7px; color: #bf7661; background: transparent; padding: 0; font-size: 10px; }
 .property-actions { display: flex; flex-wrap: wrap; gap: 13px; align-items: center; }
+.extract-button { width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 40px; margin: -4px 0 16px; border: 1px solid #c8e5d8; border-radius: 7px; color: #2b765d; background: #effaf4; font-size: 10px; font-weight: 600; }
+.extract-button:hover { border-color: #8ac9aa; background: #e3f6eb; }
+.extract-button:disabled { cursor: wait; opacity: .55; }
 .delete-element:disabled { cursor: not-allowed; opacity: .35; }
 .properties-empty { flex: 1; display: flex; align-items: center; flex-direction: column; justify-content: center; padding: 20px; text-align: center; }
 .properties-empty > span { width: 43px; height: 43px; display: grid; place-items: center; color: #aaa8a0; border-radius: 50%; background: #f2f1ec; }
@@ -382,6 +385,9 @@ kbd { padding: 2px 4px; border: 1px solid #dcdad2; border-radius: 3px; color: #8
   .editor-breadcrumb > span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; }
   .editor-actions { flex: 0 0 auto; }
   .editor-actions .secondary-button, .editor-actions > .icon-button { min-height: 40px; }
+  .export-menu { width: 100%; }
+  .export-menu .secondary-button { width: 100%; min-height: 42px; }
+  .export-options { left: 0; right: auto; width: min(100%, 235px); max-width: calc(100vw - 30px); }
   .workspace-actions { margin-bottom: 12px; }
   .specialized-main { padding: 25px 15px 38px; }
   .specialized-heading { align-items: stretch; flex-direction: column; gap: 14px; margin-bottom: 20px; }
@@ -446,6 +452,8 @@ kbd { padding: 2px 4px; border: 1px solid #dcdad2; border-radius: 3px; color: #8
   .editor-topbar { flex-wrap: wrap; }
   .editor-breadcrumb { order: 3; width: 100%; padding-left: 2px; }
   .editor-actions { margin-left: auto; }
+  .editor-heading .export-menu { width: 100%; }
+  .editor-heading .export-options { position: fixed; top: auto; right: 15px; bottom: 15px; left: 15px; width: auto; max-width: none; }
   .specialized-main { padding-left: 12px; padding-right: 12px; }
   .diagram-node { min-width: 132px; }
   .canvas-zoom-layer { min-width: 590px; }

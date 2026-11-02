@@ -15,6 +15,8 @@ type DiagramNode = {
   y: number;
   tone: string;
   shape?: NodeShape;
+  sourceUrl?: string;
+  content?: string;
 };
 
 type NodeShape = 'card' | 'circle' | 'pill' | 'diamond' | 'hexagon';
@@ -210,6 +212,22 @@ function connectorPairs(project: Project) {
     return project.nodes.slice(1).map((node) => [project.nodes[0], node] as [DiagramNode, DiagramNode]);
   }
   return project.nodes.slice(0, -1).map((node, index) => [node, project.nodes[index + 1]] as [DiagramNode, DiagramNode]);
+}
+
+const extractionStopWords = new Set('para con las los una uno que del por sus más como este esta desde entre sobre donde cuando cómo qué son'.split(' '));
+
+function extractInformation(raw: string) {
+  const document = new DOMParser().parseFromString(raw, 'text/html');
+  document.querySelectorAll('script,style,noscript,svg,nav,footer').forEach((element) => element.remove());
+  const title = document.querySelector('title, h1')?.textContent?.trim() || 'Información extraída';
+  const sections = Array.from(document.querySelectorAll('h1,h2,h3')).map((element) => element.textContent?.trim()).filter(Boolean).slice(0, 8) as string[];
+  const paragraphs = Array.from(document.querySelectorAll('p,li')).map((element) => element.textContent?.replace(/\s+/g, ' ').trim()).filter((text): text is string => Boolean(text && text.length > 30)).slice(0, 16);
+  const text = (paragraphs.length ? paragraphs : [document.body.textContent || raw]).join(' ');
+  const words = text.toLowerCase().match(/[a-záéíóúñü]{4,}/gi) ?? [];
+  const frequencies = new Map<string, number>();
+  words.forEach((word) => { if (!extractionStopWords.has(word)) frequencies.set(word, (frequencies.get(word) ?? 0) + 1); });
+  const keywords = [...frequencies.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([word]) => word);
+  return { title, sections, paragraphs, summary: text.slice(0, 520), keywords };
 }
 
 function diagramSlideFor(project: Project): Slide {
@@ -604,6 +622,7 @@ function Editor({ project, allProjects, onBack, onChange, onToast }: { project: 
   const [selectedNodeId, setSelectedNodeId] = useState(project.nodes[0]?.id ?? '');
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [zoom, setZoom] = useState(100);
+  const [extracting, setExtracting] = useState(false);
   const draggingNodeRef = useRef<string | null>(null);
   const type = typeFor(project.type);
   const selectedNode = project.nodes.find((node) => node.id === selectedNodeId) ?? project.nodes[0];
@@ -683,10 +702,36 @@ function Editor({ project, allProjects, onBack, onChange, onToast }: { project: 
 
   const stopMovingNode = () => { draggingNodeRef.current = null; };
 
+  const extractNodeInformation = async () => {
+    if (!selectedNode || extracting) return;
+    setExtracting(true);
+    try {
+      let raw = selectedNode.content?.trim() ?? '';
+      const sourceUrl = selectedNode.sourceUrl?.trim() ?? '';
+      if (sourceUrl) {
+        const response = await fetch(sourceUrl);
+        if (!response.ok) throw new Error('No se pudo leer el sitio');
+        raw = await response.text();
+      }
+      if (!raw) throw new Error('Pega HTML o texto en Contenido fuente, o agrega una URL compatible con lectura directa.');
+      const result = extractInformation(raw);
+      const base = { ...selectedNode, label: result.title, detail: `${result.summary}${result.keywords.length ? `\n\nPalabras clave: ${result.keywords.join(', ')}` : ''}`, content: raw, sourceUrl: sourceUrl || selectedNode.sourceUrl };
+      const extractedSections = result.sections.length ? result.sections.slice(0, 6).filter((section) => section !== result.title) : result.paragraphs.slice(0, 6).map((_, index) => `Hallazgo ${index + 1}`);
+      const generated = extractedSections.map((section, index) => ({ id: `node-${Date.now()}-${index}`, label: section, detail: result.paragraphs[index] || 'Sección extraída de la fuente.', content: result.paragraphs[index] || '', sourceUrl, x: 18 + (index % 3) * 32, y: 18 + Math.floor(index / 3) * 28, tone: ['blue', 'lilac', 'green', 'orange'][index % 4], shape: project.type === 'mindmap' ? 'pill' as NodeShape : 'card' as NodeShape }));
+      onChange({ ...project, nodes: [{ ...base, x: project.type === 'mindmap' ? 50 : base.x, y: project.type === 'mindmap' ? 50 : base.y }, ...project.nodes.filter((node) => node.id !== selectedNode.id), ...generated] });
+      setSelectedNodeId(selectedNode.id);
+      onToast(`${generated.length} nodos creados a partir de la información extraída`);
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : 'No se pudo extraer la información');
+    } finally {
+      setExtracting(false);
+    }
+  };
+
   return (
     <div className="editor-shell">
       <header className="editor-topbar"><button className="back-link" onClick={onBack}><Icon name="back" size={17} /> Volver a proyectos</button><div className="editor-breadcrumb"><span>/</span><span>{project.name}</span><span className="editor-type-pill" style={{ color: type.color, backgroundColor: type.soft }}><Icon name={type.icon} size={13} /> {type.label}</span></div><div className="editor-actions"><span className="saved-label"><span className="canvas-live-dot" /> Guardado local</span></div></header>
-          <main className="editor-main"><div className="editor-heading"><div><span className="section-kicker">Editor de diagrama</span><h1>{project.name}</h1><p>{type.description}. Cambia, elimina o añade elementos para construir tu flujo.</p></div><ExportMenu project={project} onExport={(format) => { downloadProject(project, format); onToast('Diagrama descargado'); }} /></div><div className={`editor-workspace ${inspectorOpen ? '' : 'inspector-is-closed'}`}><aside className="canvas-tools"><span className="tool-label">Herramientas</span><button className="tool-button is-active" title="Seleccionar"><Icon name="command" /></button><button className="tool-button" title="Añadir elemento" onClick={addNode}><Icon name="add" /></button><div className="tools-line" /><span className="tool-label">Vista</span><button className="tool-button" title="Ajustar lienzo" onClick={fitCanvas}><Icon name="grid" /></button><button className="zoom-value zoom-button" title="Cambiar zoom" onClick={cycleZoom}>{zoom}%</button></aside><section className="canvas-section"><div className="canvas-header"><span><span className="canvas-live-dot" /> Lienzo de trabajo</span><span className="canvas-help">Selecciona un elemento para editarlo</span>{!inspectorOpen && <button className="reopen-inspector" onClick={() => setInspectorOpen(true)}>Mostrar inspector <Icon name="arrow" size={13} /></button>}</div><div className="diagram-canvas" onClick={() => setSelectedNodeId('')} onPointerMove={moveNode} onPointerUp={stopMovingNode} onPointerCancel={stopMovingNode}><div className="canvas-zoom-layer" style={{ transform: `scale(${zoom / 100})` }}><svg className="canvas-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">{connectorPairs(project).map(([from, to]) => <path key={`${from.id}-${to.id}`} d={connectorPath(from, to)} />)}</svg>{project.nodes.map((node, index) => <button key={node.id} className={`diagram-node node-${node.tone} shape-${shapeForNode(project.type, node, index)} ${selectedNode?.id === node.id ? 'is-selected' : ''}`} style={{ left: `${node.x}%`, top: `${node.y}%` }} onPointerDown={(event) => { event.stopPropagation(); setSelectedNodeId(node.id); draggingNodeRef.current = node.id; event.currentTarget.setPointerCapture(event.pointerId); }} onClick={(event) => { event.stopPropagation(); setSelectedNodeId(node.id); }}><span className="node-grip"><i /><i /><i /></span><strong>{node.label}</strong><small>{node.detail}</small></button>)}</div></div><div className="canvas-footer"><span>{project.nodes.length} elementos</span><span><kbd>⌘</kbd> + <kbd>K</kbd> para comandos</span></div></section>{inspectorOpen && <aside className="properties-panel"><div className="properties-head"><div><span className="section-kicker">Inspector</span><h2>Propiedades</h2></div><button className="icon-button" aria-label="Cerrar inspector" onClick={() => setInspectorOpen(false)}><Icon name="close" size={16} /></button></div>{selectedNode ? <div className="properties-content"><div className="selected-preview" style={{ backgroundColor: type.soft, color: type.color }}><Icon name={type.icon} size={21} /><span>{type.label}</span></div><label className="field-label">Título<input value={selectedNode.label} onChange={(event) => updateNode({ label: event.target.value })} /></label><label className="field-label">Descripción<textarea value={selectedNode.detail} onChange={(event) => updateNode({ detail: event.target.value })} rows={4} /></label><label className="field-label">Forma<select value={shapeForNode(project.type, selectedNode, project.nodes.findIndex((node) => node.id === selectedNode.id))} onChange={(event) => updateNode({ shape: event.target.value as NodeShape })}><option value="card">Tarjeta</option><option value="circle">Círculo</option><option value="pill">Píldora</option><option value="diamond">Decisión</option><option value="hexagon">Hexágono</option></select></label><div className="property-meta"><span>ID del elemento</span><code>{selectedNode.id.slice(0, 12)}</code></div><div className="property-actions"><button className="delete-element" onClick={duplicateNode}><Icon name="copy" size={15} /> Duplicar</button><button className="delete-element" onClick={deleteNode} disabled={project.nodes.length <= 1}><Icon name="trash" size={15} /> Eliminar elemento</button></div></div> : <div className="properties-empty"><span><Icon name="command" size={23} /></span><p>Selecciona un elemento del lienzo para editar sus propiedades.</p></div>}<button className="add-element-button" onClick={addNode}><Icon name="plus" size={15} /> Añadir elemento</button></aside>}</div></main>
+          <main className="editor-main"><div className="editor-heading"><div><span className="section-kicker">Editor de diagrama</span><h1>{project.name}</h1><p>{type.description}. Cambia, elimina o añade elementos para construir tu flujo.</p></div><ExportMenu project={project} onExport={(format) => { downloadProject(project, format); onToast('Diagrama descargado'); }} /></div><div className={`editor-workspace ${inspectorOpen ? '' : 'inspector-is-closed'}`}><aside className="canvas-tools"><span className="tool-label">Herramientas</span><button className="tool-button is-active" title="Seleccionar"><Icon name="command" /></button><button className="tool-button" title="Añadir elemento" onClick={addNode}><Icon name="add" /></button><div className="tools-line" /><span className="tool-label">Vista</span><button className="tool-button" title="Ajustar lienzo" onClick={fitCanvas}><Icon name="grid" /></button><button className="zoom-value zoom-button" title="Cambiar zoom" onClick={cycleZoom}>{zoom}%</button></aside><section className="canvas-section"><div className="canvas-header"><span><span className="canvas-live-dot" /> Lienzo de trabajo</span><span className="canvas-help">Selecciona un elemento para editarlo</span>{!inspectorOpen && <button className="reopen-inspector" onClick={() => setInspectorOpen(true)}>Mostrar inspector <Icon name="arrow" size={13} /></button>}</div><div className="diagram-canvas" onClick={() => setSelectedNodeId('')} onPointerMove={moveNode} onPointerUp={stopMovingNode} onPointerCancel={stopMovingNode}><div className="canvas-zoom-layer" style={{ transform: `scale(${zoom / 100})` }}><svg className="canvas-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">{connectorPairs(project).map(([from, to]) => <path key={`${from.id}-${to.id}`} d={connectorPath(from, to)} />)}</svg>{project.nodes.map((node, index) => <button key={node.id} className={`diagram-node node-${node.tone} shape-${shapeForNode(project.type, node, index)} ${selectedNode?.id === node.id ? 'is-selected' : ''}`} style={{ left: `${node.x}%`, top: `${node.y}%` }} onPointerDown={(event) => { event.stopPropagation(); setSelectedNodeId(node.id); draggingNodeRef.current = node.id; event.currentTarget.setPointerCapture(event.pointerId); }} onClick={(event) => { event.stopPropagation(); setSelectedNodeId(node.id); }}><span className="node-grip"><i /><i /><i /></span><strong>{node.label}</strong><small>{node.detail}</small></button>)}</div></div><div className="canvas-footer"><span>{project.nodes.length} elementos</span><span><kbd>⌘</kbd> + <kbd>K</kbd> para comandos</span></div></section>{inspectorOpen && <aside className="properties-panel"><div className="properties-head"><div><span className="section-kicker">Inspector</span><h2>Propiedades</h2></div><button className="icon-button" aria-label="Cerrar inspector" onClick={() => setInspectorOpen(false)}><Icon name="close" size={16} /></button></div>{selectedNode ? <div className="properties-content"><div className="selected-preview" style={{ backgroundColor: type.soft, color: type.color }}><Icon name={type.icon} size={21} /><span>{type.label}</span></div><label className="field-label">Título<input value={selectedNode.label} onChange={(event) => updateNode({ label: event.target.value })} /></label><label className="field-label">Descripción<textarea value={selectedNode.detail} onChange={(event) => updateNode({ detail: event.target.value })} rows={4} /></label><label className="field-label">Fuente web (URL)<input type="url" value={selectedNode.sourceUrl ?? ''} onChange={(event) => updateNode({ sourceUrl: event.target.value })} placeholder="https://sitio.com/articulo" /></label><label className="field-label">Contenido fuente<textarea value={selectedNode.content ?? ''} onChange={(event) => updateNode({ content: event.target.value })} rows={4} placeholder="Pega aquí texto o HTML si el sitio bloquea la lectura directa." /></label><button className="extract-button" onClick={extractNodeInformation} disabled={extracting}><Icon name="spark" size={15} /> {extracting ? 'Analizando…' : 'Extraer y crear nodos'}</button><label className="field-label">Forma<select value={shapeForNode(project.type, selectedNode, project.nodes.findIndex((node) => node.id === selectedNode.id))} onChange={(event) => updateNode({ shape: event.target.value as NodeShape })}><option value="card">Tarjeta</option><option value="circle">Círculo</option><option value="pill">Píldora</option><option value="diamond">Decisión</option><option value="hexagon">Hexágono</option></select></label><div className="property-meta"><span>ID del elemento</span><code>{selectedNode.id.slice(0, 12)}</code></div><div className="property-actions"><button className="delete-element" onClick={duplicateNode}><Icon name="copy" size={15} /> Duplicar</button><button className="delete-element" onClick={deleteNode} disabled={project.nodes.length <= 1}><Icon name="trash" size={15} /> Eliminar elemento</button></div></div> : <div className="properties-empty"><span><Icon name="command" size={23} /></span><p>Selecciona un elemento del lienzo para editar sus propiedades.</p></div>}<button className="add-element-button" onClick={addNode}><Icon name="plus" size={15} /> Añadir elemento</button></aside>}</div></main>
     </div>
   );
 }
