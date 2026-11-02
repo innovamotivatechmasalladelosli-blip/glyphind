@@ -165,6 +165,10 @@ h1, h2, h3, p { margin: 0; }
 .editor-breadcrumb > span:nth-child(2) { color: #4b4a44; }
 .editor-type-pill { display: inline-flex; align-items: center; gap: 5px; padding: 5px 8px; border-radius: 20px; font-size: 10px; font-weight: 600; }
 .editor-actions { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+.export-menu { position: relative; }
+.export-options { position: absolute; z-index: 15; top: calc(100% + 7px); right: 0; min-width: 165px; padding: 5px; border: 1px solid var(--line); border-radius: 9px; background: #fffefa; box-shadow: 0 14px 30px rgba(33,31,23,.14); }
+.export-options button { width: 100%; padding: 9px 10px; border-radius: 6px; color: #67665f; background: transparent; text-align: left; font-size: 11px; }
+.export-options button:hover { color: var(--ink); background: #f5f4ef; }
 .saved-label { display: flex; align-items: center; gap: 7px; color: #98978f; font: 400 10px 'DM Mono', monospace; margin-right: 7px; }
 .primary-button.compact { padding: 9px 12px; font-size: 11px; }
 .editor-main { max-width: 1440px; margin: 0 auto; padding: 41px 42px 42px; }
@@ -190,10 +194,11 @@ h1, h2, h3, p { margin: 0; }
 .reopen-inspector:hover { color: var(--ink); }
 .canvas-live-dot { width: 6px; height: 6px; display: inline-block; vertical-align: 1px; border-radius: 50%; background: var(--green); margin-right: 7px; }
 .canvas-help { color: #b2b0a8; font-size: 10px; }
-.diagram-canvas { position: relative; flex: 1; min-height: 450px; overflow: hidden; background-color: #fdfcf8; background-image: radial-gradient(#e2e0d9 .8px, transparent .8px); background-size: 18px 18px; }
+.diagram-canvas { position: relative; flex: 1; min-height: 450px; overflow: hidden; cursor: default; background-color: #fdfcf8; background-image: radial-gradient(#e2e0d9 .8px, transparent .8px); background-size: 18px 18px; }
 .canvas-lines { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .canvas-lines path { fill: none; stroke: #d7d4cc; stroke-dasharray: 2.5 2.5; stroke-width: .5; vector-effect: non-scaling-stroke; }
-.diagram-node { position: absolute; z-index: 2; transform: translate(-50%, -50%); min-width: 126px; display: flex; flex-direction: column; align-items: flex-start; gap: 5px; padding: 12px 13px 11px; border: 1px solid transparent; border-radius: 9px; background: #fff; box-shadow: 0 5px 18px rgba(47, 43, 34, .09); text-align: left; transition: box-shadow .18s, border .18s, transform .18s; }
+.diagram-node { position: absolute; z-index: 2; transform: translate(-50%, -50%); min-width: 126px; display: flex; flex-direction: column; align-items: flex-start; gap: 5px; padding: 12px 13px 11px; border: 1px solid transparent; border-radius: 9px; background: #fff; box-shadow: 0 5px 18px rgba(47, 43, 34, .09); text-align: left; cursor: grab; user-select: none; touch-action: none; transition: box-shadow .18s, border .18s, transform .18s; }
+.diagram-node:active { cursor: grabbing; }
 .diagram-node:hover { transform: translate(-50%, -50%) translateY(-2px); box-shadow: 0 9px 22px rgba(47, 43, 34, .13); }
 .diagram-node.is-selected { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(239, 129, 94, .13), 0 8px 20px rgba(47, 43, 34, .1); }
 .diagram-node.shape-circle { width: 132px; min-width: 132px; height: 132px; align-items: center; justify-content: center; border-radius: 50%; padding: 20px; text-align: center; }
