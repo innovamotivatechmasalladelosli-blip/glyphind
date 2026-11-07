@@ -460,3 +460,80 @@ kbd { padding: 2px 4px; border: 1px solid #dcdad2; border-radius: 3px; color: #8
   .modal-foot > div { width: 100%; }
   .modal-foot .primary-button, .modal-foot .secondary-button { flex: 1 1 auto; }
 }
+
+/* ============================================================
+   Refinamiento visual: escala tipográfica legible, superficies
+   consistentes y navegación agrupada. Solo presentación.
+   ============================================================ */
+:root {
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --shadow-sm: 0 1px 2px rgba(23, 23, 23, .04), 0 1px 1px rgba(23, 23, 23, .03);
+  --shadow-md: 0 1px 2px rgba(23, 23, 23, .04), 0 8px 24px -12px rgba(23, 23, 23, .12);
+  --surface: #ffffff;
+  --text-xs: 11.5px;
+  --text-sm: 13px;
+}
+
+/* Navegación lateral */
+.sidebar-top { height: 72px; }
+.sidebar-nav { padding: 20px 14px; }
+.nav-label { color: #8f8e87; font-size: 11px; margin-bottom: 8px; }
+.nav-item { height: 38px; font-size: var(--text-sm); }
+.nav-item:hover { transform: none; }
+.nav-scroll { max-height: none; margin-top: 6px; }
+.nav-group { padding-top: 14px; }
+.nav-group + .nav-group { margin-top: 4px; border-top: 1px solid var(--line); }
+.nav-group-label { margin: 0 12px 6px; color: #9a998f; font: 600 11px 'DM Sans', sans-serif; letter-spacing: .02em; }
+.sidebar-action { font-size: var(--text-xs); color: #7f7e77; padding: 8px 0; }
+.sidebar-footnote { font-size: 11px; }
+
+/* Barra superior y cabecera */
+.topbar { box-shadow: none; }
+.breadcrumbs { font-size: var(--text-sm); }
+.top-new-button, .primary-button { font-size: var(--text-sm); border-radius: var(--radius-sm); padding: 10px 16px; }
+.page-wrap { padding-top: 48px; }
+.page-intro { padding-bottom: 28px; }
+.page-intro h1 { font-size: 36px; letter-spacing: -1.4px; }
+.eyebrow, .section-kicker { font-size: 11px; color: #8f8e87; }
+
+/* Herramientas y listas */
+.project-toolbar { border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); padding: 10px 12px; box-shadow: var(--shadow-sm); }
+.search-box, .filter-box { height: 38px; border-radius: var(--radius-sm); background: var(--paper-2); }
+.search-box input, .filter-box select { font-size: var(--text-sm); }
+.toolbar-result { font-size: 11px; }
+.projects-section { padding-top: 32px; }
+.section-heading h2 { font-size: 18px; letter-spacing: -.4px; }
+.project-list { border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); overflow: hidden; box-shadow: var(--shadow-sm); }
+.project-row { min-height: 72px; padding: 0 16px; }
+.project-row:last-child { border-bottom: 0; }
+.project-row:hover { background: var(--paper-2); }
+.project-type-icon { width: 38px; height: 38px; flex-basis: 38px; border-radius: var(--radius-md); }
+.project-copy strong { font-size: 14px; }
+.project-copy span, .project-status, .project-updated, .row-open { font-size: var(--text-xs); }
+.context-menu { border-radius: var(--radius-md); box-shadow: var(--shadow-md); }
+.context-menu button { font-size: var(--text-sm); }
+.empty-state { border-radius: var(--radius-lg); background: var(--surface); }
+.empty-state p { font-size: var(--text-sm); }
+.secondary-button { font-size: var(--text-sm); border-radius: var(--radius-sm); }
+.new-project-card { border-radius: var(--radius-lg); }
+.new-project-card strong { font-size: var(--text-sm); }
+.new-project-card small { font-size: var(--text-xs); }
+
+/* Modal de creación agrupado */
+.type-choice-group { margin-top: 14px; }
+.type-choice-group:first-child { margin-top: 10px; }
+.type-choice-group-label { display: block; margin-bottom: 8px; color: #8f8e87; font: 600 11px 'DM Sans', sans-serif; letter-spacing: .04em; text-transform: uppercase; }
+.type-choice-group .type-choice-grid { margin-top: 0; }
+
+/* Editores */
+.tool-label, .specialized-foot, .slide-list-heading small { font-size: 11px; }
+.board-column, .timeline-item, .slide-editor, .slide-list, .properties-panel, .document-workspace { border-radius: var(--radius-lg); }
+
+@media (max-width: 760px) {
+  .project-toolbar { padding: 10px; }
+  .page-wrap { padding-top: 28px; }
+  .page-intro h1 { font-size: 30px; }
+  .project-row { padding: 0 12px; }
+}

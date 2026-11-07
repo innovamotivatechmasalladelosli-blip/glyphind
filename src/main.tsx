@@ -44,22 +44,32 @@ type DiagramType = {
   icon: IconName;
   color: string;
   soft: string;
+  group: DiagramGroup;
 };
+
+type DiagramGroup = 'diagram' | 'planning' | 'content' | 'people';
+
+const diagramGroups: { id: DiagramGroup; label: string }[] = [
+  { id: 'diagram', label: 'Diagramas' },
+  { id: 'planning', label: 'Planificación' },
+  { id: 'content', label: 'Contenido' },
+  { id: 'people', label: 'Personas' },
+];
 
 const STORAGE_KEY = 'glyphind-projects-v1';
 
 const diagramTypes: DiagramType[] = [
-  { id: 'flow', label: 'Flujo', description: 'Procesos, decisiones y recorridos', icon: 'flow', color: '#5b63d8', soft: '#eef0ff' },
-  { id: 'tasks', label: 'Pendientes', description: 'Listas, prioridades y avances', icon: 'checklist', color: '#db744f', soft: '#fff0e9' },
-  { id: 'document', label: 'Documento', description: 'Redacción, revisión y entrega', icon: 'folder', color: '#3478b9', soft: '#e8f3ff' },
-  { id: 'presentation', label: 'Presentación', description: 'Narrativa, diapositivas y revisión', icon: 'grid', color: '#bc633f', soft: '#fff0e8' },
-  { id: 'concept', label: 'Mapa conceptual', description: 'Conceptos, relaciones y síntesis', icon: 'command', color: '#2e8c86', soft: '#e7f8f5' },
-  { id: 'mindmap', label: 'Mapa mental', description: 'Ideas que crecen desde un centro', icon: 'spark', color: '#bd8b31', soft: '#fff7df' },
-  { id: 'timeline', label: 'Cronograma', description: 'Fases, dependencias y fechas', icon: 'arrow', color: '#7c5ab5', soft: '#f1ebff' },
-  { id: 'board', label: 'Tablero', description: 'Entrada, progreso, revisión y cierre', icon: 'checklist', color: '#2b8e78', soft: '#e7f7f1' },
-  { id: 'custom', label: 'Flujo personalizado', description: 'Construye cualquier proceso', icon: 'add', color: '#5b63d8', soft: '#eef0ff' },
-  { id: 'team', label: 'Equipo', description: 'Roles, personas y estructura', icon: 'team', color: '#2b8e78', soft: '#e7f7f1' },
-  { id: 'community', label: 'Comunidad', description: 'Relaciones, grupos y conexiones', icon: 'community', color: '#a45dbd', soft: '#f7eafa' },
+  { id: 'flow', label: 'Flujo', description: 'Procesos, decisiones y recorridos', icon: 'flow', color: '#5b63d8', soft: '#eef0ff', group: 'diagram' },
+  { id: 'tasks', label: 'Pendientes', description: 'Listas, prioridades y avances', icon: 'checklist', color: '#db744f', soft: '#fff0e9', group: 'planning' },
+  { id: 'document', label: 'Documento', description: 'Redacción, revisión y entrega', icon: 'folder', color: '#3478b9', soft: '#e8f3ff', group: 'content' },
+  { id: 'presentation', label: 'Presentación', description: 'Narrativa, diapositivas y revisión', icon: 'grid', color: '#bc633f', soft: '#fff0e8', group: 'content' },
+  { id: 'concept', label: 'Mapa conceptual', description: 'Conceptos, relaciones y síntesis', icon: 'command', color: '#2e8c86', soft: '#e7f8f5', group: 'diagram' },
+  { id: 'mindmap', label: 'Mapa mental', description: 'Ideas que crecen desde un centro', icon: 'spark', color: '#bd8b31', soft: '#fff7df', group: 'diagram' },
+  { id: 'timeline', label: 'Cronograma', description: 'Fases, dependencias y fechas', icon: 'arrow', color: '#7c5ab5', soft: '#f1ebff', group: 'planning' },
+  { id: 'board', label: 'Tablero', description: 'Entrada, progreso, revisión y cierre', icon: 'checklist', color: '#2b8e78', soft: '#e7f7f1', group: 'planning' },
+  { id: 'custom', label: 'Flujo personalizado', description: 'Construye cualquier proceso', icon: 'add', color: '#5b63d8', soft: '#eef0ff', group: 'diagram' },
+  { id: 'team', label: 'Equipo', description: 'Roles, personas y estructura', icon: 'team', color: '#2b8e78', soft: '#e7f7f1', group: 'people' },
+  { id: 'community', label: 'Comunidad', description: 'Relaciones, grupos y conexiones', icon: 'community', color: '#a45dbd', soft: '#f7eafa', group: 'people' },
 ];
 
 const availableDiagramTypes = diagramTypes;
@@ -483,7 +493,7 @@ function App() {
           <p className="nav-label">Espacio de trabajo</p>
           <button className={`nav-item ${filter === 'all' ? 'is-active' : ''}`} onClick={() => { setActiveView('projects'); setFilter('all'); setMobileMenu(false); }}><Icon name="grid" /><span>Todos los proyectos</span><strong>{projects.length}</strong></button>
           <div className="nav-scroll">
-            {availableDiagramTypes.map((item) => <button className={`nav-item ${filter === item.id ? 'is-active' : ''}`} key={item.id} onClick={() => { setActiveView('projects'); setFilter(item.id); setMobileMenu(false); }}><Icon name={item.icon} /><span>{item.label}</span><strong>{projects.filter((project) => project.type === item.id).length || ''}</strong></button>)}
+            {diagramGroups.map((group) => <div className="nav-group" key={group.id}><p className="nav-group-label">{group.label}</p>{availableDiagramTypes.filter((item) => item.group === group.id).map((item) => <button className={`nav-item ${filter === item.id ? 'is-active' : ''}`} key={item.id} onClick={() => { setActiveView('projects'); setFilter(item.id); setMobileMenu(false); }}><Icon name={item.icon} /><span>{item.label}</span><strong>{projects.filter((project) => project.type === item.id).length || ''}</strong></button>)}</div>)}
           </div>
         </nav>
         <div className="sidebar-bottom">
@@ -505,7 +515,7 @@ function App() {
 
           <section className="project-toolbar" aria-label="Buscar y filtrar proyectos">
             <div className="search-box"><Icon name="search" size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar proyectos..." aria-label="Buscar proyectos" />{search && <button className="search-clear" onClick={() => setSearch('')}><Icon name="close" size={14} /></button>}</div>
-            <label className="filter-box"><Icon name="filter" size={16} /><select value={filter} onChange={(event) => setFilter(event.target.value)} aria-label="Filtrar por tipo"><option value="all">Todos los tipos</option>{availableDiagramTypes.map((type) => <option key={type.id} value={type.id}>{type.label}</option>)}</select><Icon name="chevron" size={15} /></label>
+            <label className="filter-box"><Icon name="filter" size={16} /><select value={filter} onChange={(event) => setFilter(event.target.value)} aria-label="Filtrar por tipo"><option value="all">Todos los tipos</option>{diagramGroups.map((group) => <optgroup key={group.id} label={group.label}>{availableDiagramTypes.filter((type) => type.group === group.id).map((type) => <option key={type.id} value={type.id}>{type.label}</option>)}</optgroup>)}</select><Icon name="chevron" size={15} /></label>
             <span className="toolbar-result">{filteredProjects.length} {filteredProjects.length === 1 ? 'proyecto' : 'proyectos'}</span>
           </section>
 
@@ -549,7 +559,7 @@ function ProjectModal({ mode, name, type, setName, setType, onSubmit, onClose }:
       <form className="project-modal" onSubmit={onSubmit}>
         <div className="modal-head"><div><span className="section-kicker">{mode === 'new' ? 'Nuevo espacio' : 'Editar espacio'}</span><h2>{mode === 'new' ? 'Crea tu próximo proyecto' : 'Ajusta los detalles'}</h2></div><button type="button" className="icon-button" onClick={onClose} aria-label="Cerrar"><Icon name="close" /></button></div>
         <label className="field-label">Nombre del proyecto<input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder="Ej. Flujo de incorporación" /></label>
-        <div className="field-label">Tipo de diagrama<div className="type-choice-grid">{availableDiagramTypes.map((item) => <button type="button" key={item.id} className={`type-choice ${type === item.id ? 'is-selected' : ''}`} onClick={() => setType(item.id)}><span style={{ color: item.color, backgroundColor: item.soft }}><Icon name={item.icon} size={19} /></span><span><strong>{item.label}</strong><small>{item.description}</small></span>{type === item.id && <i>✓</i>}</button>)}</div></div>
+        <div className="field-label">Tipo de diagrama{diagramGroups.map((group) => <div className="type-choice-group" key={group.id}><span className="type-choice-group-label">{group.label}</span><div className="type-choice-grid">{availableDiagramTypes.filter((item) => item.group === group.id).map((item) => <button type="button" key={item.id} className={`type-choice ${type === item.id ? 'is-selected' : ''}`} onClick={() => setType(item.id)}><span style={{ color: item.color, backgroundColor: item.soft }}><Icon name={item.icon} size={19} /></span><span><strong>{item.label}</strong><small>{item.description}</small></span>{type === item.id && <i>✓</i>}</button>)}</div></div>)}</div>
         <div className="modal-foot"><span>Configura tu espacio y empieza a trabajar</span><div><button type="button" className="secondary-button" onClick={onClose}>Cancelar</button><button type="submit" className="primary-button">{mode === 'new' ? 'Crear proyecto' : 'Guardar cambios'} <Icon name="arrow" size={15} /></button></div></div>
       </form>
     </div>
