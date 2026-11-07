@@ -187,13 +187,17 @@ h1, h2, h3, p { margin: 0; }
 .editor-workspace { min-height: 560px; display: grid; grid-template-columns: 59px minmax(400px, 1fr) 253px; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: #fffefa; box-shadow: 0 7px 30px rgba(35, 33, 24, .04); }
 .editor-workspace.inspector-is-closed { grid-template-columns: 59px minmax(0, 1fr); }
 .canvas-tools { display: flex; align-items: center; flex-direction: column; gap: 9px; padding: 16px 8px; border-right: 1px solid var(--line); background: #faf9f5; }
+.tool-group { width: 100%; display: flex; align-items: center; flex-direction: column; gap: 5px; }
 .tool-label { color: #b0aea7; font: 500 8px 'DM Mono', monospace; letter-spacing: .08em; text-transform: uppercase; writing-mode: vertical-rl; transform: rotate(180deg); margin: 6px 0 5px; }
 .tool-button { width: 34px; height: 34px; display: grid; place-items: center; color: #9a9991; border-radius: 7px; background: transparent; }
 .tool-button:hover, .tool-button.is-active { color: #24231f; background: #eae9e3; }
+.tool-button:disabled { cursor: not-allowed; opacity: .3; }
+.tool-button > span { display: none; }
 .tools-line { width: 22px; height: 1px; background: var(--line); margin: 6px 0; }
 .zoom-value { color: #aaa8a0; font: 400 9px 'DM Mono', monospace; writing-mode: vertical-rl; transform: rotate(180deg); margin-top: 5px; }
 .zoom-button { border: 0; background: transparent; cursor: pointer; padding: 0; }
 .zoom-button:hover { color: var(--ink); }
+.zoom-controls { display: flex; flex-direction: column; align-items: center; gap: 3px; }
 .canvas-zoom-layer { position: absolute; inset: 0; transform-origin: center; transition: transform .2s ease; }
 .canvas-zoom-layer > .canvas-lines { position: absolute; }
 
@@ -204,6 +208,7 @@ h1, h2, h3, p { margin: 0; }
 .canvas-live-dot { width: 6px; height: 6px; display: inline-block; vertical-align: 1px; border-radius: 50%; background: var(--green); margin-right: 7px; }
 .canvas-help { color: #b2b0a8; font-size: 10px; }
 .diagram-canvas { position: relative; flex: 1; min-height: 450px; overflow: hidden; cursor: default; background-color: #fdfcf8; background-image: radial-gradient(#e2e0d9 .8px, transparent .8px); background-size: 18px 18px; }
+.diagram-canvas.grid-is-hidden { background-image: none; }
 .canvas-lines { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .canvas-lines path { fill: none; stroke: #d7d4cc; stroke-dasharray: 2.5 2.5; stroke-width: .5; vector-effect: non-scaling-stroke; }
 .diagram-node { position: absolute; z-index: 2; transform: translate(-50%, -50%); min-width: 126px; display: flex; flex-direction: column; align-items: flex-start; gap: 5px; padding: 12px 13px 11px; border: 1px solid transparent; border-radius: 9px; background: #fff; box-shadow: 0 5px 18px rgba(47, 43, 34, .09); text-align: left; cursor: grab; user-select: none; touch-action: none; transition: box-shadow .18s, border .18s, transform .18s; }
@@ -610,6 +615,10 @@ kbd { padding: 2px 4px; border: 1px solid #dcdad2; border-radius: 3px; color: #8
   .editor-heading > .secondary-button, .editor-heading .export-menu { width: 100%; }
   .canvas-tools { justify-content: flex-start; gap: 6px; overflow-x: auto; scrollbar-width: none; }
   .canvas-tools .tool-label { display: none; }
+  .canvas-tools .tool-group { width: auto; flex: 0 0 auto; flex-direction: row; gap: 5px; }
+  .canvas-tools .tool-group-view { flex-direction: row; }
+  .canvas-tools .zoom-controls { flex-direction: row; gap: 3px; }
+  .canvas-tools .tools-line { width: 1px; height: 28px; margin: 0 3px; }
   .canvas-zoom-layer { min-width: 560px; }
   .diagram-node { min-width: 120px; }
   .board-workspace { grid-template-columns: repeat(4, 82%); scroll-snap-type: x mandatory; }
