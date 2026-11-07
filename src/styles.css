@@ -537,3 +537,50 @@ kbd { padding: 2px 4px; border: 1px solid #dcdad2; border-radius: 3px; color: #8
   .page-intro h1 { font-size: 30px; }
   .project-row { padding: 0 12px; }
 }
+
+/* ============================================================
+   Celular: ajustes de lista, menú, ventana y editores
+   ============================================================ */
+@media (max-width: 720px) {
+  .top-new-button { width: 40px; height: 40px; padding: 0; font-size: 0; gap: 0; border-radius: var(--radius-md); }
+  .top-new-button .icon { margin: 0; }
+  .topbar { min-height: 60px; }
+
+  /* Menú lateral como panel deslizante cómodo */
+  .sidebar { width: min(300px, 86vw); box-shadow: 0 20px 60px rgba(23, 23, 23, .18); }
+  .sidebar { height: 100dvh; min-height: 0; }
+  .sidebar-nav { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding-bottom: 12px; }
+  .nav-scroll { max-height: none; overflow: visible; }
+  .sidebar-bottom { flex: 0 0 auto; padding-top: 12px; border-top: 1px solid var(--line); background: inherit; }
+  .workspace-actions { margin-bottom: 8px; }
+  .sidebar-footnote { margin-top: 10px; }
+  .nav-item { height: 44px; }
+
+  /* Lista de proyectos */
+  .project-row { min-height: 68px; gap: 10px; }
+  .project-main { gap: 12px; padding: 12px 0; }
+  .project-copy { min-width: 0; }
+  .project-actions .more-button { width: 40px; height: 40px; }
+
+  /* Ventana de nuevo proyecto: tarjetas compactas en dos columnas */
+  .project-modal { max-height: calc(100dvh - 24px); overflow-y: auto; }
+  .type-choice-group .type-choice-grid { grid-template-columns: 1fr 1fr; gap: 6px; }
+  .type-choice { padding: 10px; gap: 8px; min-height: 0; }
+  .type-choice small { display: none; }
+  .type-choice > span:first-child { width: 30px; height: 30px; flex: 0 0 30px; }
+
+  /* Editores */
+  .editor-heading h1, .specialized-heading h1 { font-size: 26px; line-height: 1.15; overflow-wrap: anywhere; }
+  .editor-heading > .secondary-button, .editor-heading .export-menu { width: 100%; }
+  .canvas-tools { justify-content: flex-start; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+  .canvas-tools .tool-label { display: none; }
+  .canvas-zoom-layer { min-width: 560px; }
+  .diagram-node { min-width: 120px; }
+  .board-workspace { grid-template-columns: repeat(4, 82%); scroll-snap-type: x mandatory; }
+  .board-column { min-height: 320px; }
+  .slide-list { display: flex; gap: 8px; overflow-x: auto; padding: 10px; scroll-snap-type: x proximity; }
+  .slide-thumb { flex: 0 0 70%; scroll-snap-align: start; }
+  .timeline-item { gap: 12px; }
+  .document-textarea { min-height: 60vh; font-size: 15px; }
+  input, select, textarea { font-size: 16px; }
+}
