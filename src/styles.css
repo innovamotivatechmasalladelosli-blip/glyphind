@@ -695,3 +695,16 @@ kbd { padding: 2px 4px; border: 1px solid #dcdad2; border-radius: 3px; color: #8
 .canvas-full-workspace .properties-content { overflow-y: auto; min-height: 0; padding-bottom: 28px; }
 .canvas-full-workspace .properties-head { flex: 0 0 auto; }
 .project-row.menu-open { z-index: 20; }
+
+/* Selector cromático del inspector. */
+.color-picker-field { margin: 3px 0 19px; }
+.color-picker-field > .field-label { margin-bottom: 8px; }
+.color-picker-row { display: flex; align-items: center; gap: 11px; }
+.color-wheel { width: 44px; height: 44px; flex: 0 0 44px; padding: 0; overflow: hidden; border: 3px solid #fff; border-radius: 50%; background: conic-gradient(#e66b5b, #e6c45b, #6bb879, #62a9d8, #9d73c5, #e66b5b); box-shadow: 0 0 0 1px #d8d5cb, 0 4px 12px rgba(35,33,24,.12); cursor: pointer; }
+.color-wheel::-webkit-color-swatch-wrapper { padding: 0; }
+.color-wheel::-webkit-color-swatch { border: 0; border-radius: 50%; }
+.color-picker-value { display: block; color: #4f4e48; font: 700 10px 'DM Mono', monospace; }
+.color-picker-row small { display: block; color: #aaa8a0; font-size: 9px; margin-top: 4px; }
+.color-swatches { display: flex; gap: 7px; margin-top: 11px; }
+.color-swatch { width: 22px; height: 22px; padding: 0; border: 2px solid #fff; border-radius: 50%; box-shadow: 0 0 0 1px #dedbd2; cursor: pointer; }
+.color-swatch:hover { transform: scale(1.12); box-shadow: 0 0 0 2px #9f9c91; }
