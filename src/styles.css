@@ -708,3 +708,10 @@ kbd { padding: 2px 4px; border: 1px solid #dcdad2; border-radius: 3px; color: #8
 .color-swatches { display: flex; gap: 7px; margin-top: 11px; }
 .color-swatch { width: 22px; height: 22px; padding: 0; border: 2px solid #fff; border-radius: 50%; box-shadow: 0 0 0 1px #dedbd2; cursor: pointer; }
 .color-swatch:hover { transform: scale(1.12); box-shadow: 0 0 0 2px #9f9c91; }
+
+/* Rueda cromática real: el tono se elige tocando o arrastrando sobre el aro. */
+.color-wheel-wrap { display: flex; align-items: center; gap: 12px; margin: 3px 0 11px; }
+.real-color-wheel { position: relative; width: 76px; height: 76px; flex: 0 0 76px; border: 4px solid #fff; border-radius: 50%; background: conic-gradient(#ff3b30, #ff9500, #ffcc00, #34c759, #00c7be, #0a84ff, #5856d6, #af52de, #ff2d55, #ff3b30); box-shadow: 0 0 0 1px #d8d5cb, 0 5px 14px rgba(35,33,24,.14); cursor: crosshair; touch-action: none; }
+.real-color-wheel::before { content: ''; position: absolute; inset: 17px; border-radius: 50%; background: #fff; box-shadow: inset 0 0 0 1px rgba(35,33,24,.08); }
+.color-wheel-center { position: absolute; z-index: 1; inset: 25px; border: 2px solid #fff; border-radius: 50%; box-shadow: 0 0 0 1px #aaa69b; }
+.color-wheel-wrap small { display: block; color: #aaa8a0; font-size: 9px; margin-top: 4px; }
