@@ -1,0 +1,10 @@
+{
+  "name": "Glyphind — Diagramas locales",
+  "short_name": "Glyphind",
+  "lang": "es-MX",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#fbfaf7",
+  "theme_color": "#f6f5f1",
+  "description": "Diagramas explicables que viven en tu dispositivo."
+}

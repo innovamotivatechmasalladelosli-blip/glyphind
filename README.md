@@ -1,25 +1,39 @@
 # Glyphind
 
-Glyphind es un espacio local-first para crear y ordenar proyectos de diagramas. La interfaz está inspirada en una biblioteca de proyectos limpia y silenciosa, con editor de lienzo, tipos extensibles y acciones rápidas.
+Glyphind es un espacio local-first para convertir texto, páginas web y notas en diagramas editables, revisables y exportables. La fuente canónica permanece en el dispositivo: no requiere cuenta, backend ni base de datos remota para crear, editar, abrir o exportar proyectos.
 
-La aplicación publicada está disponible en [Glyphind en GitHub Pages](https://innovamotivatechmasalladelosli-blip.github.io/glyphind/). La versión pública se sirve desde la compilación estática incluida en `main`.
+## Qué incluye la base actual
 
-## Principios
+El documento Glyphind v1 conserva nodos, relaciones explícitas, páginas, grupos, fuentes, evidencia e historial opcional. Los proyectos creados con la versión anterior (`glyphind-projects-v1`) se migran al abrirse; las conexiones antiguas se convierten en `edges` sin borrar los nodos ni el contenido existente.
 
-- **Sin hosting ni base de datos:** todos los proyectos se guardan en `localStorage` del navegador.
-- **Sin cuentas:** funciona directamente en el dispositivo y no requiere autenticación.
-- **Tipos extensibles:** Flujo, Pendientes, Equipo, Comunidad y Mapa mental se definen desde un catálogo común.
-- **Responsive:** el panel de proyectos y el editor se adaptan a pantallas pequeñas.
+La persistencia intenta IndexedDB con snapshots transaccionales y mantiene localStorage como fallback de compatibilidad. El workspace completo se puede descargar como `.glyphind` y cada proyecto admite JSON editable, Markdown, CSV y SVG. Un archivo `.glyphind` se puede importar desde el mismo botón de respaldo.
+
+El análisis de fuentes se ejecuta en un Web Worker para no bloquear el canvas. El modo predeterminado usa reglas locales para detectar título, secciones, párrafos, palabras clave, nodos sugeridos y fragmentos de evidencia. Las sugerencias se muestran antes de modificar el documento y el usuario puede aceptarlas o descartarlas.
+
+Glyphind también integra un modelo gratuito y opcional mediante Transformers.js: `Xenova/flan-t5-small` en formato cuantizado. La primera activación del modo **Modelo compacto** descarga el modelo desde Hugging Face; luego el navegador lo reutiliza desde su caché y lo ejecuta en el Worker. Ese flujo de red es visible y opt-in. Si el modelo no está disponible, las reglas locales siguen funcionando y el documento no se envía a un servidor de Glyphind.
+
+El editor incorpora una **Vista de esquema** navegable por teclado y lector de pantalla, con relaciones y procedencia legibles sin depender del color. La aplicación incluye Service Worker y manifiesto PWA progresivos para reabrir la carcasa estática sin red después de la primera visita.
 
 ## Desarrollo local
 
 ```bash
-npm install
+npm ci
 npm run dev
 ```
 
-La aplicación se sirve en `http://localhost:3000`. Para generar una compilación de producción:
+La aplicación se sirve en `http://localhost:3000`. Para typecheck y pruebas del modelo:
+
+```bash
+npm run typecheck
+npm test
+```
+
+Para generar una compilación de producción, incluyendo los artefactos estáticos de GitHub Pages:
 
 ```bash
 npm run build
 ```
+
+## Privacidad y límites deliberados
+
+No hay telemetría del contenido del usuario. La lectura directa de una URL usa `fetch` desde el navegador y puede fallar por CORS; en ese caso Glyphind explica el límite y permite pegar HTML o texto, en lugar de ocultar un proxy remoto detrás de una experiencia local-first.
