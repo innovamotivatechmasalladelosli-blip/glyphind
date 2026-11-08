@@ -684,3 +684,14 @@ kbd { padding: 2px 4px; border: 1px solid #dcdad2; border-radius: 3px; color: #8
 .canvas-help { display: none; }
 .canvas-footer > span:last-child { display: none; }
 .canvas-footer { justify-content: flex-start; }
+
+/* Herramientas de forma: una opción de cuadro y una opción de pastilla. */
+.canvas-full-workspace .shape-tool { display: inline-flex; align-items: center; justify-content: center; width: auto; min-width: 52px; padding: 0 9px; border: 1px solid #dedbd2; color: #77756e; background: #fffefa; font-size: 9px; }
+.canvas-full-workspace .shape-tool > span { display: inline; }
+.canvas-full-workspace .shape-card-tool { border-radius: 7px; }
+.canvas-full-workspace .shape-pill-tool { border-radius: 999px; }
+.canvas-full-workspace .shape-tool:hover { color: var(--ink); border-color: #bbb7ac; }
+.canvas-full-workspace .properties-panel { overflow: hidden; }
+.canvas-full-workspace .properties-content { overflow-y: auto; min-height: 0; padding-bottom: 28px; }
+.canvas-full-workspace .properties-head { flex: 0 0 auto; }
+.project-row.menu-open { z-index: 20; }
