@@ -678,3 +678,9 @@ kbd { padding: 2px 4px; border: 1px solid #dcdad2; border-radius: 3px; color: #8
 .advanced-source-tools { margin: 4px 0 18px; padding: 11px 0 0; border-top: 1px solid var(--line); }
 .advanced-source-tools[open] summary { margin-bottom: 15px; }
 .advanced-source-tools .field-label { margin-bottom: 16px; }
+
+/* Modo limpio: el lienzo muestra las ideas, no metadatos ni instrucciones técnicas. */
+.diagram-node small { display: none; }
+.canvas-help { display: none; }
+.canvas-footer > span:last-child { display: none; }
+.canvas-footer { justify-content: flex-start; }

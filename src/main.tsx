@@ -65,7 +65,6 @@ const diagramTypes: DiagramType[] = [
   { id: 'presentation', label: 'Presentación', description: 'Narrativa, diapositivas y revisión', icon: 'grid', color: '#bc633f', soft: '#fff0e8', group: 'content' },
   { id: 'concept', label: 'Mapa conceptual', description: 'Conceptos, relaciones y síntesis', icon: 'command', color: '#2e8c86', soft: '#e7f8f5', group: 'diagram' },
   { id: 'mindmap', label: 'Mapa mental', description: 'Ideas que crecen desde un centro', icon: 'spark', color: '#bd8b31', soft: '#fff7df', group: 'diagram' },
-  { id: 'brace', label: 'Cuadro de llaves', description: 'Desglosa un tema de lo general a lo particular', icon: 'flow', color: '#4579a9', soft: '#eaf3fb', group: 'diagram' },
   { id: 'matrix', label: 'Matriz comparativa', description: 'Compara criterios, opciones y decisiones', icon: 'grid', color: '#8b5ca9', soft: '#f4edfa', group: 'diagram' },
   { id: 'pyramid', label: 'Pirámide', description: 'Ordena información por niveles de importancia', icon: 'arrow', color: '#c46b4c', soft: '#fff0e9', group: 'diagram' },
   { id: 'cycle', label: 'Ciclo', description: 'Explica procesos repetitivos y recorridos', icon: 'arrow', color: '#2b8e78', soft: '#e7f7f1', group: 'diagram' },
@@ -717,8 +716,8 @@ function TimelineEditor({ project, onBack, onChange, onToast }: { project: Proje
 }
 
 function Editor({ project, allProjects, onBack, onChange, onToast }: { project: Project; allProjects: Project[]; onBack: () => void; onChange: (project: Project) => void; onToast: (message: string) => void }) {
-  const [selectedNodeId, setSelectedNodeId] = useState(project.nodes[0]?.id ?? '');
-  const [inspectorOpen, setInspectorOpen] = useState(true);
+  const [selectedNodeId, setSelectedNodeId] = useState('');
+  const [inspectorOpen, setInspectorOpen] = useState(false);
   const [zoom, setZoom] = useState(100);
   const [gridVisible, setGridVisible] = useState(true);
   const [extracting, setExtracting] = useState(false);
