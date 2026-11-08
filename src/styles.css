@@ -668,3 +668,13 @@ kbd { padding: 2px 4px; border: 1px solid #dcdad2; border-radius: 3px; color: #8
   .canvas-full-workspace .canvas-footer { padding-right: 13px; }
   .canvas-full-workspace .canvas-help { display: none; }
 }
+
+/* Selección inicial más clara: lo esencial primero, herramientas avanzadas bajo demanda. */
+.more-type-options { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 13px; }
+.more-type-options summary, .advanced-source-tools summary { cursor: pointer; color: #77756e; font-size: 11px; font-weight: 600; list-style: none; }
+.more-type-options summary::before, .advanced-source-tools summary::before { content: '+'; display: inline-grid; place-items: center; width: 18px; height: 18px; margin-right: 6px; border: 1px solid var(--line); border-radius: 50%; color: var(--accent-dark); }
+.more-type-options[open] summary::before, .advanced-source-tools[open] summary::before { content: '−'; }
+.more-type-options .type-choice-group { margin-top: 14px; }
+.advanced-source-tools { margin: 4px 0 18px; padding: 11px 0 0; border-top: 1px solid var(--line); }
+.advanced-source-tools[open] summary { margin-bottom: 15px; }
+.advanced-source-tools .field-label { margin-bottom: 16px; }
