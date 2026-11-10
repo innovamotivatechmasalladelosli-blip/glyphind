@@ -1,6 +1,7 @@
 import { StrictMode, useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 import { analyzeLocally, localAiModes } from './ai/localAi';
+import { populateProjectFromAnalysis } from './domain/diagram-generation';
 import { createEdgesFromNodes, createWorkspaceEnvelope, migrateProjects, type DiagramNode, type EdgeDirection, type EdgePort, type GlyphindEdge, type GlyphindSource, type GlyphindOperationChange, type NodeShape, type Project, type ProjectData, type Slide, type BoardCard, type BoardColumn, type TimelineItem } from './domain/model';
 import { exportExcalidraw, exportMermaid, importExcalidraw, importMarkdown, importMermaid, readFormatPlugins, writeFormatPlugins, type FormatPlugin } from './domain/formats';
 import { loadWorkspace, persistWorkspace } from './storage/workspace';
@@ -366,6 +367,35 @@ function downloadFile(content: string, filename: string, mime: string) {
   URL.revokeObjectURL(url);
 }
 
+function downloadProjectPng(project: Project) {
+  const svgUrl = URL.createObjectURL(new Blob([exportProjectSvg(project)], { type: 'image/svg+xml;charset=utf-8' }));
+  const image = new Image();
+  image.onload = () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 2400;
+    canvas.height = 1600;
+    const context = canvas.getContext('2d');
+    if (!context) { URL.revokeObjectURL(svgUrl); return; }
+    context.fillStyle = '#ffffff';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob((blob) => {
+      URL.revokeObjectURL(svgUrl);
+      if (!blob) return;
+      const pngUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = pngUrl;
+      link.download = `${safeFilename(project.name)}.png`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(pngUrl), 1000);
+    }, 'image/png');
+  };
+  image.onerror = () => URL.revokeObjectURL(svgUrl);
+  image.src = svgUrl;
+}
+
 function safeFilename(name: string) {
   return name.toLowerCase().replace(/[^a-z0-9áéíóúñ]+/gi, '-').replace(/^-|-$/g, '') || 'glyphind-proyecto';
 }
@@ -373,6 +403,7 @@ function safeFilename(name: string) {
 function downloadProject(project: Project, format: ExportFormat = 'markdown') {
   const type = typeFor(project.type);
   const baseName = safeFilename(project.name);
+  if (format === 'png') { downloadProjectPng(project); return; }
   const registeredAdapter = formatAdapterRegistry.get(format);
   if (registeredAdapter?.serialize) { const extension = registeredAdapter.extensions[0]; downloadFile(registeredAdapter.serialize(project), `${baseName}.${extension}`, registeredAdapter.mime); return; }
   if (format === 'json') {
@@ -467,6 +498,15 @@ function App() {
   const [draftType, setDraftType] = useState('flow');
   const [localTemplates, setLocalTemplates] = useState<LocalTemplate[]>(() => readLocalTemplates(localStorage));
   const [formatPlugins, setFormatPlugins] = useState<FormatPlugin[]>(() => readFormatPlugins());
+  const [showAiBuilder, setShowAiBuilder] = useState(false);
+  const [aiBuilderText, setAiBuilderText] = useState('');
+  const [aiBuilderUrl, setAiBuilderUrl] = useState('');
+  const [aiBuilderName, setAiBuilderName] = useState('');
+  const [aiBuilderType, setAiBuilderType] = useState('mindmap');
+  const [aiBuilderMode, setAiBuilderMode] = useState<LocalAnalysisMode>('model');
+  const [aiBuilderBusy, setAiBuilderBusy] = useState(false);
+  const [aiBuilderProgress, setAiBuilderProgress] = useState<LocalAnalysisProgress | null>(null);
+  const [aiBuilderError, setAiBuilderError] = useState('');
   const [showTemplateManager, setShowTemplateManager] = useState(false);
   const [showPluginManager, setShowPluginManager] = useState(false);
   const [templateName, setTemplateName] = useState('');
@@ -663,6 +703,63 @@ function App() {
     setModal('new');
   };
 
+  const openAiBuilder = () => {
+    setAiBuilderText('');
+    setAiBuilderUrl('');
+    setAiBuilderName('');
+    setAiBuilderType('mindmap');
+    setAiBuilderMode('model');
+    setAiBuilderError('');
+    setAiBuilderProgress(null);
+    setShowAiBuilder(true);
+  };
+
+  const createDiagramFromText = async (event: FormEvent) => {
+    event.preventDefault();
+    if (aiBuilderBusy) return;
+    let raw = aiBuilderText.trim();
+    const sourceUrl = aiBuilderUrl.trim();
+    setAiBuilderBusy(true);
+    setAiBuilderError('');
+    setAiBuilderProgress(aiBuilderMode === 'model' ? { stage: 'starting' } : null);
+    try {
+      if (sourceUrl) {
+        const parsed = new URL(sourceUrl);
+        if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('La URL debe empezar con http:// o https://.');
+        setAiBuilderProgress({ stage: 'fetching' });
+        const controller = new AbortController();
+        const timeout = window.setTimeout(() => controller.abort(), 20_000);
+        try { raw = await readBoundedTextResponse(await fetch(sourceUrl, { signal: controller.signal }), MAX_WEB_SOURCE_BYTES); }
+        catch (error) {
+          if (error instanceof DOMException && error.name === 'AbortError') throw new Error('La página tardó más de 20 segundos. Pega el texto o inténtalo otra vez.');
+          if (error instanceof TypeError || (error instanceof Error && error.message.includes('Failed to fetch'))) throw new Error('El sitio bloquea la lectura directa por CORS. Pega aquí el texto o el HTML; Glyphind no usa un proxy remoto.');
+          throw error;
+        } finally { window.clearTimeout(timeout); }
+      }
+      if (new TextEncoder().encode(raw).byteLength > MAX_WEB_SOURCE_BYTES) throw new Error('El texto supera 1 MB. Divide el material en partes para mantener el análisis en el dispositivo.');
+      if (raw.length < 24) throw new Error('Pega una frase completa o agrega una URL compatible para poder crear tarjetas.');
+      setAiBuilderProgress(aiBuilderMode === 'model' ? { stage: 'starting' } : null);
+      const analysis = await analyzeLocally(raw, sourceUrl || undefined, aiBuilderMode, setAiBuilderProgress);
+      const title = aiBuilderName.trim() || (analysis.title !== 'Información extraída' ? analysis.title : 'Ideas desde texto');
+      const seed = createProject(title, aiBuilderType);
+      const project = populateProjectFromAnalysis(seed, analysis, sourceUrl || undefined);
+      setProjects((current) => [project, ...current]);
+      setFilter('all');
+      setSearch('');
+      setShowAiBuilder(false);
+      setAiBuilderText('');
+      setAiBuilderUrl('');
+      openProject(project);
+      const fallback = analysis.modelError ? ' (se usó extracción local de respaldo)' : '';
+      setToast(`Diagrama creado con ${project.nodes.length - 1} hallazgos y fuentes rastreables${fallback}`);
+    } catch (error) {
+      setAiBuilderError(error instanceof Error ? error.message : 'No se pudo crear el diagrama. Revisa el texto e inténtalo otra vez.');
+    } finally {
+      setAiBuilderBusy(false);
+      setAiBuilderProgress(null);
+    }
+  };
+
   const openEditModal = (project: Project) => {
     setEditingProjectId(project.id);
     setDraftName(project.name);
@@ -799,6 +896,10 @@ function App() {
               <span className="quick-action-icon"><Icon name="plus" size={18} /></span>
               <span><strong>Nuevo proyecto</strong><small>Empieza desde una plantilla</small></span>
             </button>
+            <button className="quick-action quick-action-ai" onClick={openAiBuilder}>
+              <span className="quick-action-icon"><Icon name="spark" size={18} /></span>
+              <span><strong>Crear desde texto</strong><small>Extrae ideas y llena un mapa</small></span>
+            </button>
             <button className="quick-action" onClick={() => importInputRef.current?.click()}>
               <span className="quick-action-icon"><Icon name="folder" size={17} /></span>
               <span><strong>Importar respaldo</strong><small>Continúa desde otro dispositivo</small></span>
@@ -843,6 +944,7 @@ function App() {
       </main>
 
       {modal && <ProjectModal mode={modal} name={draftName} type={draftType} setName={setDraftName} setType={setDraftType} onSubmit={submitProject} onClose={() => setModal(null)} />}
+      {showAiBuilder && <AiBuilderModal name={aiBuilderName} setName={setAiBuilderName} type={aiBuilderType} setType={setAiBuilderType} text={aiBuilderText} setText={setAiBuilderText} url={aiBuilderUrl} setUrl={setAiBuilderUrl} mode={aiBuilderMode} setMode={setAiBuilderMode} busy={aiBuilderBusy} progress={aiBuilderProgress} error={aiBuilderError} onSubmit={createDiagramFromText} onClose={() => { if (!aiBuilderBusy) setShowAiBuilder(false); }} />}
       {toast && <div className="toast" role="status" aria-live="polite"><span className="toast-check">✓</span>{toast}</div>}
     </div>
   );
@@ -865,7 +967,8 @@ function ProjectModal({ mode, name, type, setName, setType, onSubmit, onClose }:
 
 function ExportMenu({ project, onExport }: { project: Project; onExport: (format: ExportFormat) => void }) {
   const [open, setOpen] = useState(false);
-  const options: Array<[ExportFormat, string]> = [['glyphind', 'Archivo .glyphind'], ['markdown', 'Markdown'], ...formatAdapterRegistry.list().filter((adapter) => adapter.serialize).map((adapter) => [adapter.id, `${adapter.name} (.${adapter.extensions[0]})`] as [string, string]), ['json', 'JSON editable'], ['csv', 'CSV de elementos'], ['svg', 'SVG vectorial']];
+  const canExportPng = !['document', 'presentation', 'board', 'timeline', 'matrix', 'cycle', 'venn'].includes(project.type);
+  const options: Array<[ExportFormat, string]> = [['glyphind', 'Archivo .glyphind'], ['markdown', 'Markdown'], ...formatAdapterRegistry.list().filter((adapter) => adapter.serialize).map((adapter) => [adapter.id, `${adapter.name} (.${adapter.extensions[0]})`] as [string, string]), ['json', 'JSON editable'], ['csv', 'CSV de elementos'], ['svg', 'SVG vectorial'], ...(canExportPng ? [['png', 'Imagen PNG · 2×'] as [ExportFormat, string]] : [])];
   return <div className="export-menu"><button className="secondary-button" onClick={() => setOpen((value) => !value)} aria-expanded={open}><Icon name="arrow" size={14} /> Descargar <Icon name="chevron" size={14} /></button>{open && <div className="export-options">{options.map(([format, label]) => <button key={format} onClick={() => { onExport(format); setOpen(false); }}>{label}</button>)}</div>}</div>;
 }
 
@@ -1017,6 +1120,18 @@ function Editor({ project, allProjects, onBack, onChange, onToast, onTemplatesCh
   if (historyRef.current.projectId !== project.id) historyRef.current = { projectId: project.id, past: [], future: [], present: structuredClone(project), lastAt: 0, lastKey: '' };
   else if (historyRef.current.present.updated !== project.updated && project.updated > historyRef.current.present.updated) historyRef.current.present = structuredClone(project);
   useEffect(() => { setCanvasWindowIndex(0); }, [project.id]);
+  useLayoutEffect(() => {
+    if (!window.matchMedia('(max-width: 720px)').matches) return;
+    const viewport = document.querySelector<HTMLElement>('.diagram-canvas');
+    const root = viewport?.querySelector<HTMLElement>('.diagram-node');
+    if (!viewport || !root) return;
+    const frame = window.requestAnimationFrame(() => {
+      const width = viewport.scrollWidth || 760;
+      const rootX = (Number.parseFloat(root.style.left) / 100) * width;
+      viewport.scrollLeft = Math.max(0, rootX - viewport.clientWidth / 2);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [project.id]);
   const changeProject = (next: Project, coalesceKey?: string) => {
     const history = historyRef.current;
     const previous = history.present;
@@ -1277,12 +1392,14 @@ function Editor({ project, allProjects, onBack, onChange, onToast, onTemplatesCh
       generatedBy: item.generatedBy ?? 'rules',
       confidence: item.confidence,
     }));
-    const sections = analysis.sections.length ? analysis.sections.slice(0, 6) : analysis.paragraphs.slice(0, 6).map((_, index) => `Hallazgo ${index + 1}`);
+    const facts = (analysis.keySentences.length ? analysis.keySentences : analysis.paragraphs).slice(0, 8);
+    sourceRecords.forEach((record, index) => { if (facts[index]) record.fragment = facts[index].slice(0, 280); });
+    const sections = facts.map((fact, index) => analysis.sections[index] || fact.split(/[.!?]/)[0].trim().split(/\s+/).slice(0, 7).join(' '));
     const generated = sections.map((section, index): DiagramNode => ({
       id: `node-${stamp}-${index}`,
       label: section,
-      detail: analysis.paragraphs[index] || 'Sección extraída de la fuente.',
-      content: analysis.paragraphs[index] || '',
+      detail: facts[index] || 'Sección extraída de la fuente.',
+      content: facts[index] || '',
       sourceUrl: selectedNode.sourceUrl,
       evidenceId: sourceRecords[index]?.id,
       inference: 'rules',
@@ -1300,15 +1417,63 @@ function Editor({ project, allProjects, onBack, onChange, onToast, onTemplatesCh
     setSelectedNodeId(selectedNode.id);
     setAnalysis(null);
     setAnalysisError('');
-    onToast(`${generated.length} sugerencias aceptadas con evidencia trazable`);
+    onToast(`${generated.length} tarjetas creadas con evidencia trazable`);
   };
 
   return (
     <div className="editor-shell canvas-editor-shell">
       <header className="editor-topbar"><button className="back-link" onClick={onBack}><Icon name="back" size={17} /> Proyectos</button><div className="editor-breadcrumb"><span>/</span><span>{project.name}</span><span className="editor-type-pill" style={{ color: type.color, backgroundColor: type.soft }}><Icon name={type.icon} size={13} /> {type.label}</span></div><div className="editor-actions"><span className="saved-label"><span className="canvas-live-dot" /> Guardado local</span><ExportMenu project={project} onExport={(format) => { downloadProject(project, format); onToast('Diagrama descargado'); }} /></div></header>
-      <main className="editor-main canvas-editor-main"><div className="editor-heading"><div><span className="section-kicker">Lienzo de composición</span><h1>{project.name}</h1><p>Resume, conecta y transforma información en un organizador visual.</p></div><div className="canvas-format-tools"><label>Formato<select value={project.type} onChange={(event) => changeCanvasFormat(event.target.value)}>{canvasOrganizerTypes.map((item) => <option value={item.id} key={item.id}>{item.label}</option>)}</select></label><button className="secondary-button" onClick={applyTemplate}><Icon name="spark" size={15} /> Plantilla inicial</button><button className="secondary-button" onClick={saveLocalTemplate}>Guardar en biblioteca</button>{savedTemplates.length > 0 && <label className="template-picker">Mis plantillas<select aria-label="Aplicar plantilla guardada" defaultValue="" onChange={(event) => { const template = savedTemplates.find((item) => item.id === event.target.value); if (template) applyLocalTemplate(template); event.currentTarget.value = ""; }}><option value="">Elegir…</option>{savedTemplates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}</select></label>}</div></div><div className={`editor-workspace canvas-full-workspace ${inspectorOpen ? '' : 'inspector-is-closed'}`}><section className="canvas-section"><div className="canvas-header"><span><span className="canvas-live-dot" /> Lienzo de trabajo</span><span className="canvas-help">Arrastra nodos; los proyectos grandes se muestran en ventanas.</span>{canvasVirtualized && <div className="canvas-window-controls" role="navigation" aria-label="Ventanas del lienzo"><button onClick={() => changeCanvasWindow(canvasWindowIndex - 1)} disabled={canvasWindowIndex === 0}>← Vista anterior</button><span aria-live="polite">Vista {canvasWindowIndex + 1} de {canvasWindowCount} · {activeCanvasNodes.length} nodos</span><button onClick={() => changeCanvasWindow(canvasWindowIndex + 1)} disabled={canvasWindowIndex === canvasWindowCount - 1}>Vista siguiente →</button>{crossWindowEdgeCount > 0 && <small>{crossWindowEdgeCount} conectores cruzan vistas y no se dibujan aquí.</small>}</div>}{!inspectorOpen && <button className="reopen-inspector" onClick={() => setInspectorOpen(true)}>Abrir propiedades <Icon name="arrow" size={13} /></button>}<button className="outline-toggle" onClick={() => setOutlineOpen((open) => !open)} aria-expanded={outlineOpen}><Icon name="command" size={13} /> {outlineOpen ? 'Ocultar esquema' : 'Vista de esquema'}</button><div className="history-controls"><button className="outline-toggle" onClick={undo} disabled={!historyRef.current.past.length} aria-label="Deshacer cambio (Ctrl o Cmd+Z)" title="Deshacer · Ctrl/Cmd+Z">↶ Deshacer</button><button className="outline-toggle" onClick={redo} disabled={!historyRef.current.future.length} aria-label="Rehacer cambio (Ctrl o Cmd+Shift+Z)" title="Rehacer · Ctrl/Cmd+Shift+Z">↷ Rehacer</button><details className="history-details"><summary>Historial ({project.history?.length ?? 0})</summary><ol>{(project.history ?? []).slice(-12).reverse().map((operation) => <li key={operation.id}><strong>{operation.summary}</strong><time dateTime={operation.at}>{new Date(operation.at).toLocaleString()}</time>{Boolean(operation.changes?.length) && <HistoryDiff changes={operation.changes ?? []} />}</li>)}</ol></details></div></div><div className={`diagram-canvas ${gridVisible ? '' : 'grid-is-hidden'}`} onClick={() => setSelectedNodeId('')} onPointerMove={moveNode} onPointerUp={stopMovingNode} onPointerCancel={stopMovingNode}><div className="canvas-zoom-layer" style={{ transform: `scale(${zoom / 100})` }}><svg className="canvas-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><defs><marker id="glyphind-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#9d9a91" /></marker></defs>{activeCanvasEdges.map(({ edge, from, to }) => <g key={edge.id}><path d={connectorPath(from, to, edge.fromPort, edge.toPort)} markerEnd={edge.direction === "forward" || edge.direction === "both" ? "url(#glyphind-arrow)" : undefined} markerStart={edge.direction === "backward" || edge.direction === "both" ? "url(#glyphind-arrow)" : undefined} />{(edge.label || edge.relation) && <text className="edge-label" x={(from.x + to.x) / 2} y={(from.y + to.y) / 2 - 2}>{edge.label || edge.relation}</text>}</g>)}</svg>{activeCanvasNodes.map((node) => <button key={node.id} className={`diagram-node node-${node.tone} shape-${shapeForNode(project.type, node, project.nodes.findIndex((item) => item.id === node.id))} ${selectedNode?.id === node.id ? 'is-selected' : ''}`} style={{ left: `${node.x}%`, top: `${node.y}%`, borderLeftColor: colorForNode(node) }} onPointerDown={(event) => { event.stopPropagation(); setSelectedNodeId(node.id); draggingNodeRef.current = node.id; event.currentTarget.setPointerCapture(event.pointerId); }} aria-label={`${node.label}. ${node.detail}`} onClick={(event) => { event.stopPropagation(); setSelectedNodeId(node.id); }}><span className="node-grip"><i /><i /><i /></span><strong>{node.label}</strong><small>{node.detail}</small></button>)}</div></div><div className="canvas-footer"><span>{canvasVirtualized ? `${activeCanvasNodes.length} visibles de ${project.nodes.length} elementos` : `${project.nodes.length} elementos`} · {zoom}%</span><span>Arrastra para mover · selecciona para editar</span></div></section>{inspectorOpen && <aside className="properties-panel"><div className="properties-head"><div><span className="section-kicker">Propiedades</span><h2>Editar selección</h2></div><button className="icon-button" aria-label="Cerrar propiedades" onClick={() => setInspectorOpen(false)}><Icon name="close" size={16} /></button></div>{selectedNode ? <div className="properties-content"><div className="selected-preview" style={{ backgroundColor: type.soft, color: type.color }}><Icon name={type.icon} size={21} /><span>{type.label}</span></div><label className="field-label">Título<input value={selectedNode.label} onChange={(event) => updateNode({ label: event.target.value })} /></label><label className="field-label">Descripción<textarea value={selectedNode.detail} onChange={(event) => updateNode({ detail: event.target.value })} rows={4} /></label><details className="advanced-source-tools"><summary>Fuentes y resumen avanzado</summary><label className="field-label">Fuente web (URL)<input type="url" value={selectedNode.sourceUrl ?? ''} onChange={(event) => updateNode({ sourceUrl: event.target.value })} placeholder="https://sitio.com/articulo" /></label><label className="field-label">Contenido fuente<textarea value={selectedNode.content ?? ''} onChange={(event) => updateNode({ content: event.target.value })} rows={4} placeholder="Pega aquí texto o HTML para resumirlo." /></label><label className="field-label">Modo de análisis<select value={aiMode} onChange={(event) => setAiMode(event.target.value as LocalAnalysisMode)}><option value="rules">Reglas offline · sin red</option><option value="model">IA semántica local · primera descarga con red</option></select></label><p className="analysis-mode-help">{localAiModes[aiMode].description}</p><button className="extract-button" onClick={() => analyzeNodeInformation()} disabled={extracting}><Icon name="spark" size={15} /> {extracting ? (analysisProgress?.stage === 'fetching' ? 'Leyendo URL…' : analysisProgress?.stage === 'downloading' ? `Descargando modelo${analysisProgress.progress !== undefined ? ` · ${Math.round(analysisProgress.progress)}%` : '…'}` : analysisProgress?.stage === 'generating' ? 'Priorizando frases…' : analysisProgress?.stage === 'loading' ? 'Preparando modelo…' : 'Analizando en Worker…') : `Analizar con ${localAiModes[aiMode].label}`}</button>{extracting && <p className="analysis-progress" role="status" aria-live="polite">{analysisProgress?.stage === 'fetching' ? 'Leyendo la fuente web directamente; puede fallar si el sitio no permite CORS.' : analysisProgress?.stage === 'downloading' ? `Descargando ${analysisProgress.file ?? 'modelo'}${analysisProgress.progress !== undefined ? ` (${Math.round(analysisProgress.progress)}%)` : ''}. La primera descarga puede tardar.` : analysisProgress?.stage === 'generating' ? 'La IA compara la fuente con sus frases y conserva el texto literal.' : 'Preparando el análisis local.'}</p>}</details><details className="advanced-source-tools connector-editor"><summary>Conectores ({project.edges.filter((edge) => edge.from === selectedNode.id || edge.to === selectedNode.id).length})</summary><label className="field-label">Nodo de destino<select value={edgeTargetId} onChange={(event) => setEdgeTargetId(event.target.value)}><option value="">Selecciona un elemento…</option>{project.nodes.filter((node) => node.id !== selectedNode.id).map((node) => <option value={node.id} key={node.id}>{node.label}</option>)}</select></label><label className="field-label">Puerto de origen<select value={edgeFromPort} onChange={(event) => setEdgeFromPort(event.target.value as EdgePort)}><option value="auto">Automático</option><option value="top">Superior</option><option value="right">Derecho</option><option value="bottom">Inferior</option><option value="left">Izquierdo</option></select></label><label className="field-label">Puerto de destino<select value={edgeToPort} onChange={(event) => setEdgeToPort(event.target.value as EdgePort)}><option value="auto">Automático</option><option value="top">Superior</option><option value="right">Derecho</option><option value="bottom">Inferior</option><option value="left">Izquierdo</option></select></label><label className="field-label">Etiqueta del conector<input value={edgeLabel} onChange={(event) => setEdgeLabel(event.target.value)} placeholder="p. ej. depende de" /></label><label className="field-label">Dirección<select value={edgeDirection} onChange={(event) => setEdgeDirection(event.target.value as EdgeDirection)}><option value="forward">Desde el seleccionado → destino</option><option value="backward">Destino → seleccionado</option><option value="both">Ambos sentidos</option><option value="none">Sin flecha</option></select></label><button className="extract-button" onClick={createManualEdge} disabled={!edgeTargetId}><Icon name="add" size={14} /> Crear conector</button><div className="connector-list">{project.edges.filter((edge) => edge.from === selectedNode.id || edge.to === selectedNode.id).map((edge) => <div className="connector-row" key={edge.id}><strong>{project.nodes.find((node) => node.id === edge.from)?.label} → {project.nodes.find((node) => node.id === edge.to)?.label}</strong><input aria-label="Etiqueta del conector" value={edge.label ?? edge.relation ?? ""} onChange={(event) => updateEdge(edge.id, { label: event.target.value, relation: event.target.value })} placeholder="Sin etiqueta" /><select aria-label="Dirección del conector" value={edge.direction} onChange={(event) => updateEdge(edge.id, { direction: event.target.value as EdgeDirection })}><option value="forward">→</option><option value="backward">←</option><option value="both">↔</option><option value="none">—</option></select><select aria-label="Puerto de origen del conector" value={edge.fromPort ?? 'auto'} onChange={(event) => updateEdge(edge.id, { fromPort: event.target.value as EdgePort })}><option value="auto">A: Auto</option><option value="top">A: Arriba</option><option value="right">A: Derecha</option><option value="bottom">A: Abajo</option><option value="left">A: Izquierda</option></select><select aria-label="Puerto de destino del conector" value={edge.toPort ?? 'auto'} onChange={(event) => updateEdge(edge.id, { toPort: event.target.value as EdgePort })}><option value="auto">B: Auto</option><option value="top">B: Arriba</option><option value="right">B: Derecha</option><option value="bottom">B: Abajo</option><option value="left">B: Izquierda</option></select><button className="delete-element" onClick={() => removeEdge(edge.id)} aria-label="Eliminar conector"><Icon name="trash" size={13} /></button></div>)}</div></details><label className="field-label">Forma<select value={shapeForNode(project.type, selectedNode, project.nodes.findIndex((node) => node.id === selectedNode.id))} onChange={(event) => updateNode({ shape: event.target.value as NodeShape })}><option value="card">Tarjeta</option><option value="circle">Círculo</option><option value="pill">Píldora</option><option value="diamond">Decisión</option><option value="hexagon">Hexágono</option></select></label><div className="color-picker-field"><span className="field-label">Color</span><ColorWheel value={colorForNode(selectedNode)} onChange={(color) => updateNode({ colorHex: color })} /><div className="color-swatches">{Object.entries(toneColors).map(([tone, color]) => <button type="button" key={tone} className="color-swatch" style={{ backgroundColor: color }} aria-label={`Usar color ${tone}`} onClick={() => updateNode({ tone, colorHex: color })} />)}</div></div><div className="property-actions"><button className="delete-element" onClick={duplicateNode}><Icon name="copy" size={15} /> Duplicar</button><button className="delete-element" onClick={deleteNode} disabled={project.nodes.length <= 1}><Icon name="trash" size={15} /> Eliminar</button></div></div> : <div className="properties-empty"><span><Icon name="command" size={23} /></span><p>Selecciona un elemento para editarlo.</p></div>}<button className="add-element-button" onClick={addNode}><Icon name="plus" size={15} /> Añadir elemento</button></aside>}{outlineOpen && <OutlinePanel project={project} selectedNodeId={selectedNodeId} onSelect={(id) => { setSelectedNodeId(id); setInspectorOpen(true); }} onClose={() => setOutlineOpen(false)} />}</div><aside className="canvas-tools"><div className="tool-group"><span className="tool-label">Editar</span><button className="tool-button is-active" title="Seleccionar elemento"><Icon name="command" /><span>Seleccionar</span></button><button className="tool-button" title="Añadir elemento" onClick={addNode}><Icon name="add" /><span>Añadir</span></button><button className="tool-button" title="Duplicar elemento" onClick={duplicateNode} disabled={!selectedNode}><Icon name="copy" /><span>Duplicar</span></button><button className="tool-button" title="Eliminar elemento" onClick={deleteNode} disabled={!selectedNode || project.nodes.length <= 1}><Icon name="trash" /><span>Eliminar</span></button></div><div className="tools-line" /><div className="tool-group"><span className="tool-label">Organizar</span><button className="tool-button" title="Ordenar automáticamente" onClick={fitCanvas}><Icon name="flow" /><span>Ordenar</span></button><button className="tool-button shape-tool shape-card-tool" title="Aplicar forma cuadro" onClick={() => setSelectedShape('card')}><span>Cuadro</span></button><button className="tool-button shape-tool shape-pill-tool" title="Aplicar forma pastilla" onClick={() => setSelectedShape('pill')}><span>Pastilla</span></button></div><div className="tools-line" /><div className="tool-group tool-group-view"><span className="tool-label">Vista</span><div className="zoom-controls"><button className="tool-button" title="Alejar" onClick={() => updateZoom(-25)} disabled={zoom <= 50}>−</button><button className="zoom-value zoom-button" title="Restablecer zoom" onClick={resetZoom}>{zoom}%</button><button className="tool-button" title="Acercar" onClick={() => updateZoom(25)} disabled={zoom >= 175}>+</button></div></div></aside>{analysis && <AnalysisReview result={analysis} error={analysisError} mode={aiMode} onModeChange={setAiMode} onRetry={() => { void analyzeNodeInformation(); }} onAccept={acceptAnalysis} onDiscard={() => { setAnalysis(null); setAnalysisError(''); }} />}</main>
+      <main className="editor-main canvas-editor-main"><div className="editor-heading"><div><span className="section-kicker">Lienzo de composición</span><h1>{project.name}</h1><p>Resume, conecta y transforma información en un organizador visual.</p></div><div className="canvas-format-tools"><label>Formato<select value={project.type} onChange={(event) => changeCanvasFormat(event.target.value)}>{canvasOrganizerTypes.map((item) => <option value={item.id} key={item.id}>{item.label}</option>)}</select></label><button className="secondary-button" onClick={applyTemplate}><Icon name="spark" size={15} /> Plantilla inicial</button><button className="secondary-button" onClick={saveLocalTemplate}>Guardar en biblioteca</button>{savedTemplates.length > 0 && <label className="template-picker">Mis plantillas<select aria-label="Aplicar plantilla guardada" defaultValue="" onChange={(event) => { const template = savedTemplates.find((item) => item.id === event.target.value); if (template) applyLocalTemplate(template); event.currentTarget.value = ""; }}><option value="">Elegir…</option>{savedTemplates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}</select></label>}</div></div><div className={`editor-workspace canvas-full-workspace ${inspectorOpen ? '' : 'inspector-is-closed'}`}><section className="canvas-section"><div className="canvas-header"><span><span className="canvas-live-dot" /> Lienzo de trabajo</span><span className="canvas-help">Arrastra nodos; en móvil desliza para explorar el lienzo.</span>{canvasVirtualized && <div className="canvas-window-controls" role="navigation" aria-label="Ventanas del lienzo"><button onClick={() => changeCanvasWindow(canvasWindowIndex - 1)} disabled={canvasWindowIndex === 0}>← Vista anterior</button><span aria-live="polite">Vista {canvasWindowIndex + 1} de {canvasWindowCount} · {activeCanvasNodes.length} nodos</span><button onClick={() => changeCanvasWindow(canvasWindowIndex + 1)} disabled={canvasWindowIndex === canvasWindowCount - 1}>Vista siguiente →</button>{crossWindowEdgeCount > 0 && <small>{crossWindowEdgeCount} conectores cruzan vistas y no se dibujan aquí.</small>}</div>}{!inspectorOpen && <button className="reopen-inspector" onClick={() => setInspectorOpen(true)}>Abrir propiedades <Icon name="arrow" size={13} /></button>}<button className="outline-toggle" onClick={() => setOutlineOpen((open) => !open)} aria-expanded={outlineOpen}><Icon name="command" size={13} /> {outlineOpen ? 'Ocultar esquema' : 'Vista de esquema'}</button><div className="history-controls"><button className="outline-toggle" onClick={undo} disabled={!historyRef.current.past.length} aria-label="Deshacer cambio (Ctrl o Cmd+Z)" title="Deshacer · Ctrl/Cmd+Z">↶ Deshacer</button><button className="outline-toggle" onClick={redo} disabled={!historyRef.current.future.length} aria-label="Rehacer cambio (Ctrl o Cmd+Shift+Z)" title="Rehacer · Ctrl/Cmd+Shift+Z">↷ Rehacer</button><details className="history-details"><summary>Historial ({project.history?.length ?? 0})</summary><ol>{(project.history ?? []).slice(-12).reverse().map((operation) => <li key={operation.id}><strong>{operation.summary}</strong><time dateTime={operation.at}>{new Date(operation.at).toLocaleString()}</time>{Boolean(operation.changes?.length) && <HistoryDiff changes={operation.changes ?? []} />}</li>)}</ol></details></div></div><div className={`diagram-canvas ${gridVisible ? '' : 'grid-is-hidden'}`} onClick={() => setSelectedNodeId('')} onPointerMove={moveNode} onPointerUp={stopMovingNode} onPointerCancel={stopMovingNode}><div className="canvas-zoom-layer" style={{ transform: `scale(${zoom / 100})` }}><svg className="canvas-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><defs><marker id="glyphind-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#9d9a91" /></marker></defs>{activeCanvasEdges.map(({ edge, from, to }) => <g key={edge.id}><path d={connectorPath(from, to, edge.fromPort, edge.toPort)} markerEnd={edge.direction === "forward" || edge.direction === "both" ? "url(#glyphind-arrow)" : undefined} markerStart={edge.direction === "backward" || edge.direction === "both" ? "url(#glyphind-arrow)" : undefined} />{(edge.label || edge.relation) && <text className="edge-label" x={(from.x + to.x) / 2} y={(from.y + to.y) / 2 - 2}>{edge.label || edge.relation}</text>}</g>)}</svg>{activeCanvasNodes.map((node) => <button key={node.id} className={`diagram-node node-${node.tone} shape-${shapeForNode(project.type, node, project.nodes.findIndex((item) => item.id === node.id))} ${selectedNode?.id === node.id ? 'is-selected' : ''}`} style={{ left: `${node.x}%`, top: `${node.y}%`, borderLeftColor: colorForNode(node) }} onPointerDown={(event) => { event.stopPropagation(); setSelectedNodeId(node.id); draggingNodeRef.current = node.id; event.currentTarget.setPointerCapture(event.pointerId); }} aria-label={`${node.label}. ${node.detail}`} onClick={(event) => { event.stopPropagation(); setSelectedNodeId(node.id); }}><span className="node-grip"><i /><i /><i /></span><strong>{node.label}</strong><small>{node.detail}</small></button>)}</div></div><div className="canvas-footer"><span>{canvasVirtualized ? `${activeCanvasNodes.length} visibles de ${project.nodes.length} elementos` : `${project.nodes.length} elementos`} · {zoom}%</span><span>Arrastra para mover · selecciona para editar</span></div></section>{inspectorOpen && <aside className="properties-panel"><div className="properties-head"><div><span className="section-kicker">Propiedades</span><h2>Editar selección</h2></div><button className="icon-button" aria-label="Cerrar propiedades" onClick={() => setInspectorOpen(false)}><Icon name="close" size={16} /></button></div>{selectedNode ? <div className="properties-content"><div className="selected-preview" style={{ backgroundColor: type.soft, color: type.color }}><Icon name={type.icon} size={21} /><span>{type.label}</span></div><label className="field-label">Título<input value={selectedNode.label} onChange={(event) => updateNode({ label: event.target.value })} /></label><label className="field-label">Descripción<textarea value={selectedNode.detail} onChange={(event) => updateNode({ detail: event.target.value })} rows={4} /></label><details className="advanced-source-tools"><summary>Fuentes y resumen avanzado</summary><label className="field-label">Fuente web (URL)<input type="url" value={selectedNode.sourceUrl ?? ''} onChange={(event) => updateNode({ sourceUrl: event.target.value })} placeholder="https://sitio.com/articulo" /></label><label className="field-label">Contenido fuente<textarea value={selectedNode.content ?? ''} onChange={(event) => updateNode({ content: event.target.value })} rows={4} placeholder="Pega aquí texto o HTML para resumirlo." /></label><label className="field-label">Modo de análisis<select value={aiMode} onChange={(event) => setAiMode(event.target.value as LocalAnalysisMode)}><option value="rules">Reglas offline · sin red</option><option value="model">IA semántica local · primera descarga con red</option></select></label><p className="analysis-mode-help">{localAiModes[aiMode].description}</p><button className="extract-button" onClick={() => analyzeNodeInformation()} disabled={extracting}><Icon name="spark" size={15} /> {extracting ? (analysisProgress?.stage === 'fetching' ? 'Leyendo URL…' : analysisProgress?.stage === 'downloading' ? `Descargando modelo${analysisProgress.progress !== undefined ? ` · ${Math.round(analysisProgress.progress)}%` : '…'}` : analysisProgress?.stage === 'generating' ? 'Priorizando frases…' : analysisProgress?.stage === 'loading' ? 'Preparando modelo…' : 'Analizando en Worker…') : `Analizar con ${localAiModes[aiMode].label}`}</button>{extracting && <p className="analysis-progress" role="status" aria-live="polite">{analysisProgress?.stage === 'fetching' ? 'Leyendo la fuente web directamente; puede fallar si el sitio no permite CORS.' : analysisProgress?.stage === 'downloading' ? `Descargando ${analysisProgress.file ?? 'modelo'}${analysisProgress.progress !== undefined ? ` (${Math.round(analysisProgress.progress)}%)` : ''}. La primera descarga puede tardar.` : analysisProgress?.stage === 'generating' ? 'La IA compara la fuente con sus frases y conserva el texto literal.' : 'Preparando el análisis local.'}</p>}</details><details className="advanced-source-tools connector-editor"><summary>Conectores ({project.edges.filter((edge) => edge.from === selectedNode.id || edge.to === selectedNode.id).length})</summary><label className="field-label">Nodo de destino<select value={edgeTargetId} onChange={(event) => setEdgeTargetId(event.target.value)}><option value="">Selecciona un elemento…</option>{project.nodes.filter((node) => node.id !== selectedNode.id).map((node) => <option value={node.id} key={node.id}>{node.label}</option>)}</select></label><label className="field-label">Puerto de origen<select value={edgeFromPort} onChange={(event) => setEdgeFromPort(event.target.value as EdgePort)}><option value="auto">Automático</option><option value="top">Superior</option><option value="right">Derecho</option><option value="bottom">Inferior</option><option value="left">Izquierdo</option></select></label><label className="field-label">Puerto de destino<select value={edgeToPort} onChange={(event) => setEdgeToPort(event.target.value as EdgePort)}><option value="auto">Automático</option><option value="top">Superior</option><option value="right">Derecho</option><option value="bottom">Inferior</option><option value="left">Izquierdo</option></select></label><label className="field-label">Etiqueta del conector<input value={edgeLabel} onChange={(event) => setEdgeLabel(event.target.value)} placeholder="p. ej. depende de" /></label><label className="field-label">Dirección<select value={edgeDirection} onChange={(event) => setEdgeDirection(event.target.value as EdgeDirection)}><option value="forward">Desde el seleccionado → destino</option><option value="backward">Destino → seleccionado</option><option value="both">Ambos sentidos</option><option value="none">Sin flecha</option></select></label><button className="extract-button" onClick={createManualEdge} disabled={!edgeTargetId}><Icon name="add" size={14} /> Crear conector</button><div className="connector-list">{project.edges.filter((edge) => edge.from === selectedNode.id || edge.to === selectedNode.id).map((edge) => <div className="connector-row" key={edge.id}><strong>{project.nodes.find((node) => node.id === edge.from)?.label} → {project.nodes.find((node) => node.id === edge.to)?.label}</strong><input aria-label="Etiqueta del conector" value={edge.label ?? edge.relation ?? ""} onChange={(event) => updateEdge(edge.id, { label: event.target.value, relation: event.target.value })} placeholder="Sin etiqueta" /><select aria-label="Dirección del conector" value={edge.direction} onChange={(event) => updateEdge(edge.id, { direction: event.target.value as EdgeDirection })}><option value="forward">→</option><option value="backward">←</option><option value="both">↔</option><option value="none">—</option></select><select aria-label="Puerto de origen del conector" value={edge.fromPort ?? 'auto'} onChange={(event) => updateEdge(edge.id, { fromPort: event.target.value as EdgePort })}><option value="auto">A: Auto</option><option value="top">A: Arriba</option><option value="right">A: Derecha</option><option value="bottom">A: Abajo</option><option value="left">A: Izquierda</option></select><select aria-label="Puerto de destino del conector" value={edge.toPort ?? 'auto'} onChange={(event) => updateEdge(edge.id, { toPort: event.target.value as EdgePort })}><option value="auto">B: Auto</option><option value="top">B: Arriba</option><option value="right">B: Derecha</option><option value="bottom">B: Abajo</option><option value="left">B: Izquierda</option></select><button className="delete-element" onClick={() => removeEdge(edge.id)} aria-label="Eliminar conector"><Icon name="trash" size={13} /></button></div>)}</div></details><label className="field-label">Forma<select value={shapeForNode(project.type, selectedNode, project.nodes.findIndex((node) => node.id === selectedNode.id))} onChange={(event) => updateNode({ shape: event.target.value as NodeShape })}><option value="card">Tarjeta</option><option value="circle">Círculo</option><option value="pill">Píldora</option><option value="diamond">Decisión</option><option value="hexagon">Hexágono</option></select></label><div className="color-picker-field"><span className="field-label">Color</span><ColorWheel value={colorForNode(selectedNode)} onChange={(color) => updateNode({ colorHex: color })} /><div className="color-swatches">{Object.entries(toneColors).map(([tone, color]) => <button type="button" key={tone} className="color-swatch" style={{ backgroundColor: color }} aria-label={`Usar color ${tone}`} onClick={() => updateNode({ tone, colorHex: color })} />)}</div></div><div className="property-actions"><button className="delete-element" onClick={duplicateNode}><Icon name="copy" size={15} /> Duplicar</button><button className="delete-element" onClick={deleteNode} disabled={project.nodes.length <= 1}><Icon name="trash" size={15} /> Eliminar</button></div></div> : <div className="properties-empty"><span><Icon name="command" size={23} /></span><p>Selecciona un elemento para editarlo.</p></div>}<button className="add-element-button" onClick={addNode}><Icon name="plus" size={15} /> Añadir elemento</button></aside>}{outlineOpen && <OutlinePanel project={project} selectedNodeId={selectedNodeId} onSelect={(id) => { setSelectedNodeId(id); setInspectorOpen(true); }} onClose={() => setOutlineOpen(false)} />}</div><aside className="canvas-tools"><div className="tool-group"><span className="tool-label">Editar</span><button className="tool-button is-active" title="Seleccionar elemento"><Icon name="command" /><span>Seleccionar</span></button><button className="tool-button" title="Añadir elemento" onClick={addNode}><Icon name="add" /><span>Añadir</span></button><button className="tool-button" title="Duplicar elemento" onClick={duplicateNode} disabled={!selectedNode}><Icon name="copy" /><span>Duplicar</span></button><button className="tool-button" title="Eliminar elemento" onClick={deleteNode} disabled={!selectedNode || project.nodes.length <= 1}><Icon name="trash" /><span>Eliminar</span></button></div><div className="tools-line" /><div className="tool-group"><span className="tool-label">Organizar</span><button className="tool-button" title="Ordenar automáticamente" onClick={fitCanvas}><Icon name="flow" /><span>Ordenar</span></button><button className="tool-button shape-tool shape-card-tool" title="Aplicar forma cuadro" onClick={() => setSelectedShape('card')}><span>Cuadro</span></button><button className="tool-button shape-tool shape-pill-tool" title="Aplicar forma pastilla" onClick={() => setSelectedShape('pill')}><span>Pastilla</span></button></div><div className="tools-line" /><div className="tool-group tool-group-view"><span className="tool-label">Vista</span><div className="zoom-controls"><button className="tool-button" title="Alejar" onClick={() => updateZoom(-25)} disabled={zoom <= 50}>−</button><button className="zoom-value zoom-button" title="Restablecer zoom" onClick={resetZoom}>{zoom}%</button><button className="tool-button" title="Acercar" onClick={() => updateZoom(25)} disabled={zoom >= 175}>+</button></div></div></aside>{analysis && <AnalysisReview result={analysis} error={analysisError} mode={aiMode} onModeChange={setAiMode} onRetry={() => { void analyzeNodeInformation(); }} onAccept={acceptAnalysis} onDiscard={() => { setAnalysis(null); setAnalysisError(''); }} />}</main>
     </div>
   );
 }
 
 createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>);
+
+
+function AiBuilderModal({ name, setName, type, setType, text, setText, url, setUrl, mode, setMode, busy, progress, error, onSubmit, onClose }: {
+  name: string;
+  setName: (value: string) => void;
+  type: string;
+  setType: (value: string) => void;
+  text: string;
+  setText: (value: string) => void;
+  url: string;
+  setUrl: (value: string) => void;
+  mode: LocalAnalysisMode;
+  setMode: (value: LocalAnalysisMode) => void;
+  busy: boolean;
+  progress: LocalAnalysisProgress | null;
+  error: string;
+  onSubmit: (event: FormEvent) => void;
+  onClose: () => void;
+}) {
+  const progressText = progress?.stage === 'fetching'
+    ? 'Leyendo el texto fuente…'
+    : progress?.stage === 'downloading'
+      ? `Descargando el modelo local${progress.progress !== undefined ? ` · ${Math.round(progress.progress)}%` : '…'}`
+      : progress?.stage === 'loading'
+        ? 'Preparando el modelo en este dispositivo…'
+        : progress?.stage === 'generating'
+          ? 'Comparando frases de la fuente y organizando hallazgos…'
+          : 'Iniciando análisis local…';
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target && !busy) onClose(); }}>
+      <form className="project-modal ai-builder-modal" onSubmit={onSubmit} aria-labelledby="ai-builder-title">
+        <div className="modal-head"><div><span className="section-kicker">De texto a mapa · en tu dispositivo</span><h2 id="ai-builder-title">Pega tus ideas. Sal con un diagrama.</h2><p className="ai-builder-intro">Glyphind separa frases de la fuente y las convierte en tarjetas editables con conectores y referencias.</p></div><button type="button" className="icon-button" onClick={onClose} disabled={busy} aria-label="Cerrar generador"><Icon name="close" /></button></div>
+        <label className="field-label">URL pública opcional<input type="url" value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://sitio.com/artículo" /></label>
+        <label className="field-label">Texto o contenido para organizar<textarea className="ai-builder-source" autoFocus value={text} onChange={(event) => setText(event.target.value)} rows={8} maxLength={1_000_000} placeholder="Pega aquí un artículo, apuntes o una explicación…\n\nEjemplo: El equipo recibe solicitudes. Primero revisa el objetivo y el plazo. Después asigna una persona responsable y confirma el resultado." /></label>
+        <div className="ai-builder-meta"><span>{text.length.toLocaleString('es-MX')} caracteres</span><span>Las frases originales quedan como detalle y fuente de cada tarjeta.</span></div>
+        <div className="ai-builder-fields">
+          <label className="field-label">Nombre del proyecto<input value={name} onChange={(event) => setName(event.target.value)} placeholder="Se toma del título si lo dejas vacío" /></label>
+          <label className="field-label">Cómo organizarlo<select value={type} onChange={(event) => setType(event.target.value)}><option value="mindmap">Mapa mental · ideas alrededor del tema</option><option value="concept">Mapa conceptual · conceptos y relaciones</option><option value="flow">Flujo · conserva el orden del texto</option></select></label>
+        </div>
+        <label className="field-label">Motor local<select value={mode} onChange={(event) => setMode(event.target.value as LocalAnalysisMode)}><option value="model">IA semántica local · recomendado</option><option value="rules">Extracción offline · sin descarga</option></select></label>
+        <div className="ai-builder-privacy"><Icon name="save" size={15} /><span><strong>Privado y local.</strong> El texto se analiza en este dispositivo y no consume créditos de API. Si agregas URL, el navegador visita directamente ese sitio; CORS puede bloquear la lectura. El modelo semántico se descarga una vez.</span></div>
+        {error && <p className="ai-builder-error" role="alert">{error}</p>}
+        {busy && <p className="ai-builder-progress" role="status" aria-live="polite">{progressText}</p>}
+        <div className="modal-foot"><span>Podrás editar, deshacer y exportar PNG después.</span><div><button type="button" className="secondary-button" onClick={onClose} disabled={busy}>Cancelar</button><button type="submit" className="primary-button" disabled={busy || (text.trim().length < 24 && !url.trim())}><Icon name="spark" size={15} /> {busy ? 'Organizando…' : 'Crear diagrama'}</button></div></div>
+      </form>
+    </div>
+  );
+}

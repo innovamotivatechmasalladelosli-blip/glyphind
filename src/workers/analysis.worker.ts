@@ -6,6 +6,7 @@ export type AnalysisEvidence = Pick<GlyphindSource, 'kind' | 'title' | 'url' | '
 export type LocalAnalysisResult = {
   title: string;
   summary: string;
+  keySentences: string[];
   sections: string[];
   paragraphs: string[];
   keywords: string[];
@@ -52,7 +53,8 @@ function keyTerms(text: string) {
 }
 
 function buildResult(raw: string, sourceUrl?: string): LocalAnalysisResult {
-  const title = snippets(raw, 'title')[0] || snippets(raw, 'h1')[0] || 'Información extraída';
+  const textTitle = plainTextParagraphs(raw)[0]?.split(/[.!?:;]/)[0]?.trim().split(/\s+/).slice(0, 8).join(' ');
+  const title = snippets(raw, 'title')[0] || snippets(raw, 'h1')[0] || textTitle || 'Información extraída';
   const sections = [...snippets(raw, 'h1'), ...snippets(raw, 'h2'), ...snippets(raw, 'h3')].filter((section, index, all) => section !== title && all.indexOf(section) === index).slice(0, 8);
   const paragraphs = [...snippets(raw, 'p'), ...snippets(raw, 'li')].filter((paragraph) => paragraph.length > 30).slice(0, 16);
   const usableParagraphs = paragraphs.length ? paragraphs : plainTextParagraphs(raw);
@@ -71,6 +73,7 @@ function buildResult(raw: string, sourceUrl?: string): LocalAnalysisResult {
   return {
     title,
     summary: text.slice(0, 520),
+    keySentences: splitSummarySentences(text).slice(0, 8),
     sections,
     paragraphs: usableParagraphs,
     keywords,
@@ -88,7 +91,7 @@ function reportProgress(id: number, progress: LocalAnalysisProgress) {
   self.postMessage({ id, ok: true, progress } satisfies AnalyzeResponse);
 }
 
-async function selectWithLocalModel(text: string, requestId: number) {
+async function selectWithLocalModel(queryText: string, text: string, requestId: number) {
   if (!generator) {
     reportProgress(requestId, { stage: 'downloading' });
     const transformers = await import('@huggingface/transformers');
@@ -107,7 +110,7 @@ async function selectWithLocalModel(text: string, requestId: number) {
   const sentences = splitSummarySentences(text);
   if (!sentences.length) throw new Error('No hay frases suficientemente largas para clasificar semánticamente.');
   reportProgress(requestId, { stage: 'generating' });
-  const inputs = [`query: ${text.slice(0, 1800)}`, ...sentences.map((sentence) => `passage: ${sentence}`)];
+  const inputs = [`query: ${queryText.slice(0, 1800)}`, ...sentences.map((sentence) => `passage: ${sentence}`)];
   const output = await currentGenerator(inputs, { pooling: 'mean', normalize: true });
   const [rows, width] = output.dims;
   if (rows !== inputs.length || !width || output.data.length < rows * width) throw new Error('El modelo local devolvió embeddings incompletos.');
@@ -119,20 +122,21 @@ async function selectWithLocalModel(text: string, requestId: number) {
     const normB = Math.sqrt(query.reduce((sum, value) => sum + value * value, 0));
     return normA && normB ? dot / (normA * normB) : Number.NaN;
   });
-  const selected = selectSemanticSentences(sentences, scores, 2);
+  const selected = selectSemanticSentences(sentences, scores, 6);
   if (!selected.length) throw new Error('No se pudo puntuar ninguna frase de la fuente. Se conserva la extracción local.');
-  return selected.join(' ');
+  return selected;
 }
 
 self.onmessage = async (event: MessageEvent<AnalyzeRequest>) => {
   const request = event.data;
   if (request.action !== 'analyze') return;
   try {
-    const result = buildResult(request.raw, request.sourceUrl);
-    if (request.mode === 'model') {
-      try {
-        const sourceText = `${result.title}. ${result.paragraphs.slice(0, 4).join(' ') || result.summary}`;
-        result.summary = await selectWithLocalModel(sourceText, request.id);
+      const result = buildResult(request.raw, request.sourceUrl);
+      if (request.mode === 'model') {
+        try {
+          const sourceText = result.paragraphs.join(' ') || result.summary;
+          result.keySentences = await selectWithLocalModel(`${result.title}. ${result.summary}`, sourceText, request.id);
+          result.summary = result.keySentences.slice(0, 2).join(' ');
         result.modelUsed = true;
         result.modelId = MODEL_ID;
       } catch (error) {

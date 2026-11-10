@@ -26,9 +26,10 @@
 
 ## IA gratuita ejecutada en el dispositivo
 
-- [x] El modo predeterminado usa reglas locales, sin descargar modelos ni enviar contenido fuera del dispositivo.
+- [x] El inspector mantiene reglas locales como modo inicial; el nuevo asistente de diagramas propone IA semántica local explícitamente y conserva un modo offline sin descarga.
 - [x] Se integró Transformers.js con `Xenova/multilingual-e5-small` cuantizado como modo opt-in de IA semántica. Ordena frases literales de la fuente (no redacta); corre en el Worker y usa caché del navegador tras la primera descarga.
-- [x] La interfaz diferencia reglas offline de IA semántica local y conserva un fallback determinista si el modelo no puede descargarse o ejecutarse. Prueba Chromium con texto español: dos frases literales pertinentes, sin errores JS.
+- [x] La interfaz diferencia reglas offline de IA semántica local y conserva un fallback determinista si el modelo no puede descargarse o ejecutarse. Chromium móvil ejecutó el modelo español y creó tarjetas y conectores con frases literales, sin errores JS.
+- [x] Acción visible «Crear desde texto»: acepta texto o URL directa (cuando el sitio permite CORS), crea un proyecto nuevo y llena el mapa con un nodo raíz, hasta ocho frases fuente, conectores y referencias locales. La selección semántica corre en Worker; el análisis no usa API remota ni créditos.
 
 ## Editor accesible y experiencia móvil
 
@@ -44,7 +45,7 @@
 ## Verificación de entrega
 
 - [x] `npm run typecheck` termina sin errores.
-- [x] `npm test` ejecuta 48 pruebas de migración, formatos, adaptadores, edges/puertos, historial/diffs, SVG seguro, plantillas, estructuras semánticas, fuentes compartidas, recuperación y selección semántica.
+- [x] `npm test` ejecuta 52 pruebas incluyendo generación de diagramas desde evidencia, deduplicación del título, tipos de diagrama, formatos, historial/diffs, plantillas, recuperación y selección semántica.
 - [x] `npm run build` genera la SPA, el Worker de análisis, los artefactos WASM de Transformers.js, el manifiesto y el Service Worker.
 - [x] El repositorio canónico de GitHub se utilizó como fuente de trabajo y conserva el flujo de build estático.
 
@@ -58,17 +59,19 @@
 - [x] Undo/redo semántico por snapshots disponible en canvas, documentos, presentaciones, tableros y cronogramas; soporta agrupación de escritura/arrastre y un máximo de 80 snapshots por sesión.
 - [x] Historial visible guarda diffs antes/después por campo, los compara en paneles visuales y muestra las 12 operaciones más recientes tanto en canvas como en editores especializados; el registro persistido conserva hasta 100 operaciones por proyecto.
 - [x] El editor manual de conectores permite destino, etiqueta, dirección, puerto de origen/destino (auto, superior, derecho, inferior o izquierdo), edición de puertos y eliminación; se validan endpoints y duplicados.
-- [x] Exportación SVG autocontenida con escaping XML, whitelist de color, formas, flechas, etiquetas y puertos probados.
+- [x] Exportación SVG autocontenida con escaping XML, whitelist de color, formas, flechas, etiquetas y puertos probados; los diagramas de nodos también descargan PNG local a 2400×1600.
+- [ ] Añadir exportación PNG fiel de las vistas especializadas (matriz, ciclos, Venn, tablero, cronograma, documentos y presentaciones); la opción se oculta en esos tipos para no descargar una imagen parcial.
 - [x] API ejecutable de adaptadores de formato confiables integrados al build: registro tipado, dispatch por extensión y funciones parser/exporter reales. Plugins JSON externos sólo agregan metadatos; no se evalúa JavaScript arbitrario.
 - [ ] Carga dinámica de código aportado por usuarios aún no habilitada; requiere un sandbox con aislamiento/permisos auditados y pruebas ante código malicioso, no sólo un registro de metadatos.
 - [x] Extracción HTML usa DOMParser en documento inerte, descarta elementos activos/embebidos y limita la fuente a 2 MB; importación de archivos limita a 10 MB.
 - [x] El workflow `.github/workflows/ci.yml` automatiza typecheck, suite de pruebas y build en pushes y pull requests.
-- [x] `npm run typecheck`, `npm test` (48 pruebas) y `npm run build` pasan tras integrar IA multilingüe y comparación visual del historial.
-- [x] CI remoto verificado después del push a `main`; build de GitHub Pages publica JavaScript y CSS estáticos.
+- [x] `npm run typecheck`, `npm test` (52 pruebas) y `npm run build` pasan localmente con IA, generación desde texto, PNG y scroll táctil móvil.
+- [x] CI y GitHub Pages se verificaron para el commit previo `d74ef4c`; la ejecución remota de esta mejora debe comprobarse después del nuevo push.
 - [x] Matriz comparativa con opciones/criterios/celdas editables, ciclo con orden y cierre explícito, y conjuntos A/B con pertenencia e intersección editables; sus estructuras y referencias de página se guardan localmente, CSV/Markdown exportan datos semánticos y JSON conserva relaciones de ciclo/página.
 - [x] Tablero: columnas editables/reordenables, límites WIP y traslado de tarjetas; cronograma: duración y dependencias acíclicas. UI probada en desktop y móvil.
 - [x] Canvas grande: ventana de hasta 80 nodos, navegación por vistas, conexiones entre ventanas indicadas y datos completos intactos; Playwright probó 181 nodos y preservación del documento.
 - [x] Captura móvil PWA desde la acción Compartir del sistema: recibe título/texto/URL, crea un documento local y conserva la URL y fragmento en Fuentes. Debe instalarse Glyphind como app para aparecer en el selector del sistema operativo.
+- [x] El canvas móvil ahora permite desplazamiento táctil real; centra el primer nodo al abrir y no recorta los nodos fuera del área visible. Probado a 390 px.
 - [x] Playwright/Chrome: selección de nodos por teclado; árbol AX con 38 controles interactivos y ninguno sin nombre accesible en el flujo probado.
 - [ ] Prueba física con TalkBack y VoiceOver; no se sustituye por la auditoría automática de Chromium y requiere Android/iOS con lector real.
 - [ ] Implementar colaboración opt-in con Yjs/WebRTC. Sigue sin compartirse contenido ni usar señalización remota hasta definir el flujo de conexión, manejo de conflictos y consentimiento explícito por proyecto.
