@@ -1,5 +1,6 @@
 node_modules/
 dist/
+workers/url-reader/dist/
 *.tsbuildinfo
 .DS_Store
 .env

@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "node scripts/prepare-dev.mjs && vite --host 0.0.0.0 --port 3000",
-    "build": "tsc -b && node scripts/build-pages.mjs",
+    "build": "tsc -b && npm run build:worker && node scripts/build-pages.mjs",
+    "build:worker": "vite build --config workers/url-reader/vite.config.ts",
     "preview": "vite preview --host 0.0.0.0",
     "test": "tsx --test src/**/*.test.ts",
     "typecheck": "tsc -b --pretty false"

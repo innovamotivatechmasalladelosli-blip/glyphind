@@ -1,0 +1,15 @@
+name = "glyphind-url-reader"
+main = "dist/worker.js"
+compatibility_date = "2026-11-10"
+workers_dev = true
+
+[observability]
+enabled = false
+
+[[ratelimits]]
+name = "URL_PROXY_RATE_LIMIT"
+namespace_id = "20261110"
+
+  [ratelimits.simple]
+  limit = 6
+  period = 60

@@ -8,7 +8,7 @@ La queja prioritaria fue que la función de IA parecía no hacer nada: no extra�
 
 ## Cambios implementados en esta continuación
 
-- Se añadió una acción visible en el dashboard, **Crear desde texto**. Recibe texto pegado o una URL pública. Las URLs se leen desde el navegador, sin proxy; CORS puede impedirlas y el UI explica que, en tal caso, se pegue el contenido.
+- Se añadió una acción visible en el dashboard, **Crear desde texto**. Recibe texto pegado o URL pública. Primero intenta leerla desde el navegador; si CORS bloquea, permite pegar texto/HTML o elegir el proxy remoto. Cada uso del proxy requiere consentimiento explícito para ese intento y muestra la URL y el envío a Cloudflare.
 - El asistente recomienda `Xenova/multilingual-e5-small` en un Worker y muestra progreso de lectura/descarga/carga/análisis. El modelo puntúa frases existentes y conserva su literalidad; no es un generador que invente hechos. Como alternativa existe extracción por reglas, sin descargar el modelo.
 - La acción crea y abre un proyecto con nodo raíz, hasta ocho frases seleccionadas, tarjetas editables, conectores y fuente local por tarjeta. Los detalles conservan las frases completas. Cuando el título deriva de la primera frase, se evita duplicarla como rama; conectores autogenerados no reciben etiquetas redundantes.
 - En el inspector, el botón de análisis ahora explica que crea tarjetas/conectores y la aceptación utiliza las frases relevantes como contenido de las tarjetas, no sólo títulos genéricos.
@@ -17,7 +17,7 @@ La queja prioritaria fue que la función de IA parecía no hacer nada: no extra�
 
 ## Privacidad y uso de créditos
 
-La inferencia semántica se ejecuta en el dispositivo mediante Transformers.js; el texto no se envía a una API de generación. El usuario puede elegir el modo offline sin descarga. El modelo se descarga la primera vez y luego puede aprovechar la caché del navegador. La URL es una excepción de red deliberada: el navegador contacta el sitio indicado directamente. Esta implementación no utilizó créditos externos de LLM.
+La inferencia semántica se ejecuta en el dispositivo mediante Transformers.js; el texto no se envía a una API de generación. El usuario puede elegir el modo offline sin descarga. El modelo se descarga la primera vez y luego puede aprovechar la caché del navegador. Una URL se intenta leer directamente; si el usuario autoriza el proxy, Cloudflare recibe la URL, obtiene temporalmente el texto de la página y lo devuelve al cliente para extracción local. El Worker limita CORS al origen oficial de Pages, aplica 6 lecturas/minuto, timeout de 12 s, 1 MB, bloquea destinos privados/literales, credenciales, puertos no estándar y redirects; observabilidad/logs están desactivados. Queda riesgo residual de DNS rebinding entre validación y fetch, documentado en `docs/PROXY_CLOUDFLARE_REFERENCIAS.md`. Esta implementación no utilizó créditos externos de LLM.
 
 No cambiar a un modelo de nube ni enviar texto fuente a terceros sin consentimiento explícito del usuario y una explicación de privacidad y coste.
 

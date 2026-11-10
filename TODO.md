@@ -19,7 +19,8 @@
 ## Texto, web y evidencia explicable
 
 - [x] El análisis de texto, HTML y URL se ejecuta en un Web Worker para no bloquear el canvas.
-- [x] La URL se lee directamente desde el navegador y, cuando CORS lo impide, la interfaz ofrece pegar HTML o texto y explica que no existe un proxy remoto oculto.
+- [x] La URL se intenta leer primero desde el navegador; si CORS lo impide, la interfaz ofrece pegar texto/HTML o usar un proxy remoto opcional, que exige consentimiento explícito para cada intento y muestra qué se enviará.
+- [x] Worker Cloudflare dedicado `/read`: CORS limitado al origen oficial, sin observabilidad/logs, 6 lecturas por minuto, timeout 12 s, cuerpo máximo 1 MB, destinos públicos HTTP(S), sin credenciales ni puertos no estándar, y rechaza redirects; respuesta `text/plain` para análisis local. Verificar DNS antes del fetch tiene riesgo residual de DNS rebinding documentado.
 - [x] Las propuestas conservan fragmentos, selector aproximado, fecha, URL opcional, confianza y método de generación.
 - [x] El usuario puede revisar, aceptar o descartar sugerencias antes de incorporarlas al documento.
 - [x] El panel de revisión muestra evidencia y relaciones sugeridas con etiquetas legibles.
@@ -45,8 +46,8 @@
 ## Verificación de entrega
 
 - [x] `npm run typecheck` termina sin errores.
-- [x] `npm test` ejecuta 52 pruebas incluyendo generación de diagramas desde evidencia, deduplicación del título, tipos de diagrama, formatos, historial/diffs, plantillas, recuperación y selección semántica.
-- [x] `npm run build` genera la SPA, el Worker de análisis, los artefactos WASM de Transformers.js, el manifiesto y el Service Worker.
+- [x] `npm test` ejecuta 63 pruebas incluyendo generación de diagramas desde evidencia, proxy/CORS/SSRF y límites, deduplicación del título, formatos, historial/diffs, plantillas, recuperación y selección semántica.
+- [x] `npm run build` genera la SPA, el Worker de análisis, el Worker Cloudflare separado, los artefactos WASM de Transformers.js, el manifiesto y el Service Worker.
 - [x] El repositorio canónico de GitHub se utilizó como fuente de trabajo y conserva el flujo de build estático.
 
 ## Estado real de las integraciones y trabajo aún pendiente

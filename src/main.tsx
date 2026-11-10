@@ -18,6 +18,8 @@ import type { LocalAnalysisMode, LocalAnalysisProgress, LocalAnalysisResult } fr
 import { AnalysisReview, OutlinePanel } from './components/local-panels';
 import { HistoryDiff } from './components/history-diff';
 import { SemanticDiagramEditor } from './components/semantic-diagram-editor';
+import { UrlProxyConsent } from './components/url-proxy-consent';
+import { readTextViaUrlProxy } from './domain/url-proxy-client';
 import './styles.css';
 
 type IconName =
@@ -507,6 +509,8 @@ function App() {
   const [aiBuilderBusy, setAiBuilderBusy] = useState(false);
   const [aiBuilderProgress, setAiBuilderProgress] = useState<LocalAnalysisProgress | null>(null);
   const [aiBuilderError, setAiBuilderError] = useState('');
+  const [proxyPromptUrl, setProxyPromptUrl] = useState('');
+  const [proxyPromptOpen, setProxyPromptOpen] = useState(false);
   const [showTemplateManager, setShowTemplateManager] = useState(false);
   const [showPluginManager, setShowPluginManager] = useState(false);
   const [templateName, setTemplateName] = useState('');
@@ -711,14 +715,15 @@ function App() {
     setAiBuilderMode('model');
     setAiBuilderError('');
     setAiBuilderProgress(null);
+    setProxyPromptUrl('');
+    setProxyPromptOpen(false);
     setShowAiBuilder(true);
   };
 
-  const createDiagramFromText = async (event: FormEvent) => {
-    event.preventDefault();
+  const buildDiagramFromText = async (useProxy = false) => {
     if (aiBuilderBusy) return;
     let raw = aiBuilderText.trim();
-    const sourceUrl = aiBuilderUrl.trim();
+    const sourceUrl = useProxy ? proxyPromptUrl.trim() : aiBuilderUrl.trim();
     setAiBuilderBusy(true);
     setAiBuilderError('');
     setAiBuilderProgress(aiBuilderMode === 'model' ? { stage: 'starting' } : null);
@@ -727,14 +732,24 @@ function App() {
         const parsed = new URL(sourceUrl);
         if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('La URL debe empezar con http:// o https://.');
         setAiBuilderProgress({ stage: 'fetching' });
-        const controller = new AbortController();
-        const timeout = window.setTimeout(() => controller.abort(), 20_000);
-        try { raw = await readBoundedTextResponse(await fetch(sourceUrl, { signal: controller.signal }), MAX_WEB_SOURCE_BYTES); }
-        catch (error) {
-          if (error instanceof DOMException && error.name === 'AbortError') throw new Error('La página tardó más de 20 segundos. Pega el texto o inténtalo otra vez.');
-          if (error instanceof TypeError || (error instanceof Error && error.message.includes('Failed to fetch'))) throw new Error('El sitio bloquea la lectura directa por CORS. Pega aquí el texto o el HTML; Glyphind no usa un proxy remoto.');
-          throw error;
-        } finally { window.clearTimeout(timeout); }
+        if (useProxy) {
+          raw = await readTextViaUrlProxy(sourceUrl);
+          setProxyPromptUrl('');
+          setProxyPromptOpen(false);
+        } else {
+          const controller = new AbortController();
+          const timeout = window.setTimeout(() => controller.abort(), 20_000);
+          try { raw = await readBoundedTextResponse(await fetch(sourceUrl, { signal: controller.signal }), MAX_WEB_SOURCE_BYTES); }
+          catch (error) {
+            if (error instanceof DOMException && error.name === 'AbortError') throw new Error('La página tardó más de 20 segundos. Pega el texto o inténtalo otra vez.');
+            if (error instanceof TypeError || (error instanceof Error && error.message.includes('Failed to fetch'))) {
+              setProxyPromptUrl(sourceUrl);
+              setProxyPromptOpen(true);
+              throw new Error('El sitio bloquea la lectura directa por CORS. Puedes pegar el contenido o revisar el permiso opcional del proxy.');
+            }
+            throw error;
+          } finally { window.clearTimeout(timeout); }
+        }
       }
       if (new TextEncoder().encode(raw).byteLength > MAX_WEB_SOURCE_BYTES) throw new Error('El texto supera 1 MB. Divide el material en partes para mantener el análisis en el dispositivo.');
       if (raw.length < 24) throw new Error('Pega una frase completa o agrega una URL compatible para poder crear tarjetas.');
@@ -749,6 +764,8 @@ function App() {
       setShowAiBuilder(false);
       setAiBuilderText('');
       setAiBuilderUrl('');
+      setProxyPromptUrl('');
+      setProxyPromptOpen(false);
       openProject(project);
       const fallback = analysis.modelError ? ' (se usó extracción local de respaldo)' : '';
       setToast(`Diagrama creado con ${project.nodes.length - 1} hallazgos y fuentes rastreables${fallback}`);
@@ -758,6 +775,16 @@ function App() {
       setAiBuilderBusy(false);
       setAiBuilderProgress(null);
     }
+  };
+
+  const createDiagramFromText = (event: FormEvent) => {
+    event.preventDefault();
+    void buildDiagramFromText(false);
+  };
+
+  const confirmProxyRead = () => {
+    if (!proxyPromptUrl || aiBuilderBusy) return;
+    void buildDiagramFromText(true);
   };
 
   const openEditModal = (project: Project) => {
@@ -944,7 +971,8 @@ function App() {
       </main>
 
       {modal && <ProjectModal mode={modal} name={draftName} type={draftType} setName={setDraftName} setType={setDraftType} onSubmit={submitProject} onClose={() => setModal(null)} />}
-      {showAiBuilder && <AiBuilderModal name={aiBuilderName} setName={setAiBuilderName} type={aiBuilderType} setType={setAiBuilderType} text={aiBuilderText} setText={setAiBuilderText} url={aiBuilderUrl} setUrl={setAiBuilderUrl} mode={aiBuilderMode} setMode={setAiBuilderMode} busy={aiBuilderBusy} progress={aiBuilderProgress} error={aiBuilderError} onSubmit={createDiagramFromText} onClose={() => { if (!aiBuilderBusy) setShowAiBuilder(false); }} />}
+      {showAiBuilder && <AiBuilderModal name={aiBuilderName} setName={setAiBuilderName} type={aiBuilderType} setType={setAiBuilderType} text={aiBuilderText} setText={setAiBuilderText} url={aiBuilderUrl} setUrl={(value) => { setAiBuilderUrl(value); setProxyPromptUrl(''); setProxyPromptOpen(false); setAiBuilderError(''); }} mode={aiBuilderMode} setMode={setAiBuilderMode} busy={aiBuilderBusy} progress={aiBuilderProgress} error={aiBuilderError} proxyAvailable={Boolean(proxyPromptUrl && !proxyPromptOpen)} onOpenProxyConsent={() => setProxyPromptOpen(true)} onSubmit={createDiagramFromText} onClose={() => { if (!aiBuilderBusy) setShowAiBuilder(false); }} />}
+      {showAiBuilder && proxyPromptUrl && proxyPromptOpen && !aiBuilderBusy && <UrlProxyConsent url={proxyPromptUrl} busy={aiBuilderBusy} error={aiBuilderError} onCancel={() => setProxyPromptOpen(false)} onConfirm={confirmProxyRead} />}
       {toast && <div className="toast" role="status" aria-live="polite"><span className="toast-check">✓</span>{toast}</div>}
     </div>
   );
@@ -1431,7 +1459,7 @@ function Editor({ project, allProjects, onBack, onChange, onToast, onTemplatesCh
 createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>);
 
 
-function AiBuilderModal({ name, setName, type, setType, text, setText, url, setUrl, mode, setMode, busy, progress, error, onSubmit, onClose }: {
+function AiBuilderModal({ name, setName, type, setType, text, setText, url, setUrl, mode, setMode, busy, progress, error, proxyAvailable, onOpenProxyConsent, onSubmit, onClose }: {
   name: string;
   setName: (value: string) => void;
   type: string;
@@ -1445,6 +1473,8 @@ function AiBuilderModal({ name, setName, type, setType, text, setText, url, setU
   busy: boolean;
   progress: LocalAnalysisProgress | null;
   error: string;
+  proxyAvailable: boolean;
+  onOpenProxyConsent: () => void;
   onSubmit: (event: FormEvent) => void;
   onClose: () => void;
 }) {
@@ -1469,8 +1499,9 @@ function AiBuilderModal({ name, setName, type, setType, text, setText, url, setU
           <label className="field-label">Cómo organizarlo<select value={type} onChange={(event) => setType(event.target.value)}><option value="mindmap">Mapa mental · ideas alrededor del tema</option><option value="concept">Mapa conceptual · conceptos y relaciones</option><option value="flow">Flujo · conserva el orden del texto</option></select></label>
         </div>
         <label className="field-label">Motor local<select value={mode} onChange={(event) => setMode(event.target.value as LocalAnalysisMode)}><option value="model">IA semántica local · recomendado</option><option value="rules">Extracción offline · sin descarga</option></select></label>
-        <div className="ai-builder-privacy"><Icon name="save" size={15} /><span><strong>Privado y local.</strong> El texto se analiza en este dispositivo y no consume créditos de API. Si agregas URL, el navegador visita directamente ese sitio; CORS puede bloquear la lectura. El modelo semántico se descarga una vez.</span></div>
+        <div className="ai-builder-privacy"><Icon name="save" size={15} /><span><strong>Local por defecto.</strong> El texto pegado se analiza en este dispositivo y no consume créditos de API. Primero se intenta leer la URL directamente. Si CORS lo impide, puedes elegir enviar sólo esa URL al proxy de Cloudflare; cada intento requiere tu permiso y el análisis semántico sigue aquí. No uses enlaces con tokens o datos de acceso.</span></div>
         {error && <p className="ai-builder-error" role="alert">{error}</p>}
+        {proxyAvailable && <div className="ai-builder-proxy-cta"><span>¿Quieres intentar con la URL sin volver a consultarla directamente?</span><button type="button" className="secondary-button" onClick={onOpenProxyConsent}>Autorizar una lectura</button></div>}
         {busy && <p className="ai-builder-progress" role="status" aria-live="polite">{progressText}</p>}
         <div className="modal-foot"><span>Podrás editar, deshacer y exportar PNG después.</span><div><button type="button" className="secondary-button" onClick={onClose} disabled={busy}>Cancelar</button><button type="submit" className="primary-button" disabled={busy || (text.trim().length < 24 && !url.trim())}><Icon name="spark" size={15} /> {busy ? 'Organizando…' : 'Crear diagrama'}</button></div></div>
       </form>
