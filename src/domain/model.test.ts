@@ -21,6 +21,16 @@ test('migra un proyecto legado a Glyphind v1 sin perder nodos', () => {
   assert.equal(project.pages[0].nodeIds.length, 2);
 });
 
+test('crea relaciones explícitas de retorno para diagramas tipo ciclo', () => {
+  const nodes = [
+    { id: 'a', label: 'Observar', detail: '', x: 50, y: 10, tone: 'blue' },
+    { id: 'b', label: 'Actuar', detail: '', x: 50, y: 90, tone: 'green' },
+  ];
+  const edges = createEdgesFromNodes('cycle', nodes);
+  assert.deepEqual(edges.map(({ from, to }) => [from, to]), [['a', 'b'], ['b', 'a']]);
+  assert.equal(edges.every((edge) => edge.relation === 'siguiente paso'), true);
+});
+
 test('conserva relaciones explícitas y descarta endpoints inválidos', () => {
   const project = normalizeProject({
     id: 'explicit-1',

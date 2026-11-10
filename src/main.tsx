@@ -8,8 +8,10 @@ import { collectProjectDiff, describeProjectChange, mergeDiffs } from './domain/
 import { exportProjectSvg } from './domain/svg';
 import { applyLocalTemplate as applyTemplateProject, createLocalTemplate, readLocalTemplates, writeLocalTemplates, type LocalTemplate } from './domain/templates';
 import { formatAdapterRegistry } from './domain/format-adapters';
+import { ensureVennGroups, readCycleData, readMatrixData } from './domain/semantics';
 import type { LocalAnalysisMode, LocalAnalysisResult } from './workers/analysis.worker';
 import { AnalysisReview, OutlinePanel } from './components/local-panels';
+import { SemanticDiagramEditor } from './components/semantic-diagram-editor';
 import './styles.css';
 
 type IconName =
@@ -321,6 +323,8 @@ function initialData(type: string, relatedProjects: Project[] = []): ProjectData
   if (type === 'presentation') return { slides: [{ id: `slide-${Date.now()}`, title: 'Título de la presentación', body: 'Escribe la idea principal de esta diapositiva.' }, ...presentationSlidesFor(relatedProjects)] };
   if (type === 'board') return { board: [{ id: 'backlog', title: 'Entrada', cards: [{ id: `card-${Date.now()}`, title: 'Primera tarjeta', detail: 'Describe el trabajo pendiente' }] }, { id: 'progress', title: 'En progreso', cards: [] }, { id: 'review', title: 'Revisión', cards: [] }, { id: 'done', title: 'Hecho', cards: [] }] };
   if (type === 'timeline') return { timeline: [{ id: `phase-${Date.now()}`, title: 'Definir alcance', date: 'Semana 1', detail: 'Alinear objetivos, responsables y entregables.' }, { id: `phase-${Date.now()}-2`, title: 'Construir primera versión', date: 'Semana 2', detail: 'Ejecutar las tareas prioritarias.' }] };
+  if (type === 'matrix') return { matrix: { columns: ['Criterio 1', 'Criterio 2'], cells: {} } };
+  if (type === 'cycle') return { cycle: { closedLoop: true } };
   return {};
 }
 
@@ -334,7 +338,10 @@ function createProject(name: string, type: string, relatedProjects: Project[] = 
     updated: Date.now(),
     nodes,
     edges: createEdgesFromNodes(type, nodes),
-    groups: [],
+    groups: type === 'venn' ? [
+      { id: 'set-a', label: 'Grupo A', nodeIds: nodes.filter((node) => ['Grupo A', 'En común'].includes(node.label)).map((node) => node.id), color: '#7c72d6' },
+      { id: 'set-b', label: 'Grupo B', nodeIds: nodes.filter((node) => ['Grupo B', 'En común'].includes(node.label)).map((node) => node.id), color: '#df78af' },
+    ] : [],
     pages: [{ id: 'page-main', title: 'Página principal', nodeIds: nodes.map((node) => node.id), edgeIds: createEdgesFromNodes(type, nodes).map((edge) => edge.id) }],
     sources: [],
     data: initialData(type, relatedProjects),
@@ -371,7 +378,19 @@ function downloadProject(project: Project, format: ExportFormat = 'markdown') {
     return;
   }
   if (format === 'csv') {
-    const rows = [['id', 'titulo', 'detalle', 'x', 'y', 'forma', 'tono', 'evidencia'], ...project.nodes.map((node, index) => [node.id, node.label, node.detail, String(node.x), String(node.y), shapeForNode(project.type, node, index), node.tone, node.evidenceId ?? ''])];
+    let rows: string[][];
+    if (project.type === 'matrix') {
+      const matrix = readMatrixData(project);
+      rows = [['Opción', ...matrix.columns], ...project.nodes.map((node) => [node.label, ...matrix.columns.map((column) => matrix.cells[node.id]?.[column] ?? '')])];
+    } else if (project.type === 'cycle') {
+      const cycle = readCycleData(project);
+      rows = [['orden', 'paso', 'detalle', 'siguiente paso'], ...project.nodes.map((node, index) => [String(index + 1), node.label, node.detail, project.nodes[index + 1]?.label ?? (cycle.closedLoop ? project.nodes[0]?.label ?? '' : '')])];
+    } else if (project.type === 'venn') {
+      const [a, b] = ensureVennGroups(project);
+      rows = [['Elemento', a.label, b.label], ...project.nodes.map((node) => [node.label, a.nodeIds.includes(node.id) ? 'Sí' : 'No', b.nodeIds.includes(node.id) ? 'Sí' : 'No'])];
+    } else {
+      rows = [['id', 'titulo', 'detalle', 'x', 'y', 'forma', 'tono', 'evidencia'], ...project.nodes.map((node, index) => [node.id, node.label, node.detail, String(node.x), String(node.y), shapeForNode(project.type, node, index), node.tone, node.evidenceId ?? ''])];
+    }
     const csv = rows.map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
     downloadFile(`\ufeff${csv}`, `${baseName}.csv`, 'text/csv;charset=utf-8');
     return;
@@ -388,7 +407,14 @@ function downloadProject(project: Project, format: ExportFormat = 'markdown') {
     downloadFile(exportExcalidraw(project), `${baseName}.excalidraw`, 'application/json;charset=utf-8');
     return;
   }
-  const specialized = project.data?.document ?? (project.data?.slides ? project.data.slides.map((slide, index) => `## ${index + 1}. ${slide.title}\n\n${slide.body}`).join('\n\n') : project.data?.timeline ? project.data.timeline.map((item) => `## ${item.date} · ${item.title}\n\n${item.detail}`).join('\n\n') : project.data?.board ? project.data.board.map((column) => `## ${column.title}\n\n${column.cards.map((card) => `- **${card.title}** — ${card.detail}`).join('\n')}`).join('\n\n') : null);
+  const semanticMarkdown = project.type === 'matrix'
+    ? (() => { const matrix = readMatrixData(project); const cell = (value: string) => value.replace(/\|/g, '\\|').replace(/\r?\n/g, '<br>'); return `# ${project.name}\n\n| Opción | ${matrix.columns.map(cell).join(' | ')} |\n| ${['---', ...matrix.columns.map(() => '---')].join(' | ')} |\n${project.nodes.map((node) => `| ${cell(node.label)} | ${matrix.columns.map((column) => cell(matrix.cells[node.id]?.[column] ?? '')).join(' | ')} |`).join('\n')}`; })()
+    : project.type === 'cycle'
+      ? `# ${project.name}\n\n${project.nodes.map((node, index) => `${index + 1}. **${node.label}**${node.detail ? ` — ${node.detail}` : ''}`).join('\n')}\n\n${readCycleData(project).closedLoop ? `Al terminar **${project.nodes[0]?.label ?? 'el primer paso'}**, el proceso vuelve al inicio.` : 'Secuencia abierta: el proceso termina después del último paso.'}`
+      : project.type === 'venn'
+        ? (() => { const [a, b] = ensureVennGroups(project); return `# ${project.name}\n\nConjuntos: **${a.label}** y **${b.label}**.\n\n${project.nodes.map((node) => { const inA = a.nodeIds.includes(node.id), inB = b.nodeIds.includes(node.id); const region = inA && inB ? 'En ambos' : inA ? `Solo ${a.label}` : inB ? `Solo ${b.label}` : 'Fuera de ambos'; return `- **${node.label}** — ${region}${node.detail ? ` · ${node.detail}` : ''}`; }).join('\n')}`; })()
+        : null;
+  const specialized = semanticMarkdown ?? project.data?.document ?? (project.data?.slides ? project.data.slides.map((slide, index) => `## ${index + 1}. ${slide.title}\n\n${slide.body}`).join('\n\n') : project.data?.timeline ? project.data.timeline.map((item) => `## ${item.date} · ${item.title}\n\n${item.detail}`).join('\n\n') : project.data?.board ? project.data.board.map((column) => `## ${column.title}\n\n${column.cards.map((card) => `- **${card.title}** — ${card.detail}`).join('\n')}`).join('\n\n') : null);
   const body = specialized ?? [
     `# ${project.name}`,
     `Tipo: ${type.label}`,
@@ -975,6 +1001,7 @@ function Editor({ project, allProjects, onBack, onChange, onToast, onTemplatesCh
   if (project.type === 'presentation') return <><PresentationEditor project={project} allProjects={allProjects} onBack={onBack} onChange={changeProject} onToast={onToast} /><HistoryDock canUndo={historyRef.current.past.length > 0} canRedo={historyRef.current.future.length > 0} undo={undo} redo={redo} operations={project.history ?? []} /></>;
   if (project.type === 'board') return <><BoardEditor project={project} onBack={onBack} onChange={changeProject} onToast={onToast} /><HistoryDock canUndo={historyRef.current.past.length > 0} canRedo={historyRef.current.future.length > 0} undo={undo} redo={redo} operations={project.history ?? []} /></>;
   if (project.type === 'timeline') return <><TimelineEditor project={project} onBack={onBack} onChange={changeProject} onToast={onToast} /><HistoryDock canUndo={historyRef.current.past.length > 0} canRedo={historyRef.current.future.length > 0} undo={undo} redo={redo} operations={project.history ?? []} /></>;
+  if (project.type === 'matrix' || project.type === 'cycle' || project.type === 'venn') return <><SemanticDiagramEditor project={project} onBack={onBack} onChange={changeProject} onToast={onToast} exportMenu={<ExportMenu project={project} onExport={(format) => { downloadProject(project, format); onToast('Proyecto descargado'); }} />} /><HistoryDock canUndo={historyRef.current.past.length > 0} canRedo={historyRef.current.future.length > 0} undo={undo} redo={redo} operations={project.history ?? []} /></>;
 
   const updateNode = (patch: Partial<DiagramNode>) => {
     if (!selectedNode) return;

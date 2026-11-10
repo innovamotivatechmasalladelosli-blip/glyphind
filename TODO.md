@@ -44,7 +44,7 @@
 ## Verificación de entrega
 
 - [x] `npm run typecheck` termina sin errores.
-- [x] `npm test` ejecuta 26 pruebas de migración, formatos, adaptadores, edges/puertos, historial/diffs, SVG seguro y plantillas.
+- [x] `npm test` ejecuta 31 pruebas de migración, formatos, adaptadores, edges/puertos, historial/diffs, SVG seguro, plantillas y estructuras semánticas.
 - [x] `npm run build` genera la SPA, el Worker de análisis, los artefactos WASM de Transformers.js, el manifiesto y el Service Worker.
 - [x] El repositorio canónico de GitHub se utilizó como fuente de trabajo y conserva el flujo de build estático.
 
@@ -62,9 +62,10 @@
 - [x] API de adaptadores compilados para parsers/exportadores con registro tipado, despacho por extensión y opciones de exportación. Los JSON importados sólo agregan metadatos: nunca cargan ni evalúan código arbitrario por seguridad.
 - [x] Extracción HTML usa DOMParser en documento inerte, descarta elementos activos/embebidos y limita la fuente a 2 MB; importación de archivos limita a 10 MB.
 - [x] El workflow `.github/workflows/ci.yml` automatiza typecheck, suite de pruebas y build en pushes y pull requests.
-- [x] `npm run typecheck` y `npm test` pasan; la suite cubre formatos, diffs, adaptadores, seguridad SVG y plantillas locales.
+- [x] `npm run typecheck` y `npm test` pasan; la suite de 31 pruebas cubre formatos, diffs, adaptadores, seguridad SVG, plantillas y semántica de ciclos.
 - [x] CI remoto verificado después del push a `main`: GitHub Actions run `42775239889` terminó con `success`; GitHub Pages sirve el JavaScript y CSS del build publicado.
-- [ ] Añadir layouts especializados y editores semánticos completos para matrices, ciclos y conjuntos; los editores de tablero y cronograma existentes aún necesitan mejoras de estructura y dependencias.
+- [x] Matriz comparativa con opciones/criterios/celdas editables, ciclo con orden y cierre explícito, y conjuntos A/B con pertenencia e intersección editables; sus estructuras y referencias de página se guardan localmente, CSV/Markdown exportan datos semánticos y JSON conserva relaciones de ciclo/página.
+- [ ] Completar mejoras de estructura y dependencias en los editores existentes de tablero y cronograma.
 - [ ] Virtualizar canvas grandes y validar carga/rendimiento con proyectos de referencia.
 - [ ] Implementar captura móvil desde la acción Compartir del sistema operativo.
 - [ ] Hacer pruebas prácticas con TalkBack y VoiceOver; las etiquetas ARIA existentes no sustituyen esas verificaciones.

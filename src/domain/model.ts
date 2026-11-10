@@ -55,7 +55,9 @@ export type Slide = { id: string; title: string; body: string; diagramProjectId?
 export type BoardCard = { id: string; title: string; detail: string };
 export type BoardColumn = { id: string; title: string; cards: BoardCard[]; wipLimit?: number };
 export type TimelineItem = { id: string; title: string; date: string; detail: string; duration?: string; dependsOn?: string[] };
-export type ProjectData = { document?: string; slides?: Slide[]; board?: BoardColumn[]; timeline?: TimelineItem[] };
+export type MatrixData = { columns: string[]; cells: Record<string, Record<string, string>> };
+export type CycleData = { closedLoop: boolean };
+export type ProjectData = { document?: string; slides?: Slide[]; board?: BoardColumn[]; timeline?: TimelineItem[]; matrix?: MatrixData; cycle?: CycleData };
 
 export type Project = {
   schemaVersion: 1;
@@ -79,15 +81,16 @@ const nowIso = () => new Date().toISOString();
 export function createEdgesFromNodes(projectType: string, nodes: DiagramNode[]): GlyphindEdge[] {
   if (nodes.length < 2) return [];
   const central = ['mindmap', 'concept', 'team', 'community'].includes(projectType);
-  const pairs = central
+  const pairs: Array<readonly [DiagramNode, DiagramNode]> = central
     ? nodes.slice(1).map((node) => [nodes[0], node] as const)
     : nodes.slice(0, -1).map((node, index) => [node, nodes[index + 1]] as const);
+  if (projectType === 'cycle') pairs.push([nodes[nodes.length - 1], nodes[0]]);
   return pairs.map(([from, to], index) => ({
-    id: `edge-${from.id}-${to.id}-${index}`,
+    id: projectType === 'cycle' ? `cycle:${from.id}:${to.id}` : `edge-${from.id}-${to.id}-${index}`,
     from: from.id,
     to: to.id,
     direction: 'forward',
-    relation: central ? 'relacionado con' : 'siguiente',
+    relation: central ? 'relacionado con' : projectType === 'cycle' ? 'siguiente paso' : 'siguiente',
     confidence: 1,
   }));
 }
