@@ -67,7 +67,7 @@
 - [x] Matriz comparativa con opciones/criterios/celdas editables, ciclo con orden y cierre explícito, y conjuntos A/B con pertenencia e intersección editables; sus estructuras y referencias de página se guardan localmente, CSV/Markdown exportan datos semánticos y JSON conserva relaciones de ciclo/página.
 - [ ] Completar mejoras de estructura y dependencias en los editores existentes de tablero y cronograma.
 - [ ] Virtualizar canvas grandes y validar carga/rendimiento con proyectos de referencia.
-- [ ] Implementar captura móvil desde la acción Compartir del sistema operativo.
+- [x] Captura móvil PWA desde la acción Compartir del sistema: recibe título/texto/URL, crea un documento local y conserva la URL y fragmento en Fuentes. Debe instalarse Glyphind como app para aparecer en el selector del sistema operativo.
 - [ ] Hacer pruebas prácticas con TalkBack y VoiceOver; las etiquetas ARIA existentes no sustituyen esas verificaciones.
 - [ ] Evaluar colaboración opt-in con Yjs/WebRTC sólo después de definir conflictos, permisos y datos que salen del dispositivo.
 - [ ] Validar recuperación tras cierre abrupto y rendimiento p95 en móviles reales.

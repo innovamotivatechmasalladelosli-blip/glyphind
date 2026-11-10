@@ -9,6 +9,7 @@ import { exportProjectSvg } from './domain/svg';
 import { applyLocalTemplate as applyTemplateProject, createLocalTemplate, readLocalTemplates, writeLocalTemplates, type LocalTemplate } from './domain/templates';
 import { formatAdapterRegistry } from './domain/format-adapters';
 import { ensureVennGroups, readCycleData, readMatrixData } from './domain/semantics';
+import { formatSharedDocument, parseShareTarget } from './domain/share-target';
 import type { LocalAnalysisMode, LocalAnalysisResult } from './workers/analysis.worker';
 import { AnalysisReview, OutlinePanel } from './components/local-panels';
 import { SemanticDiagramEditor } from './components/semantic-diagram-editor';
@@ -534,6 +535,37 @@ function App() {
     if (!hydrated) return;
     persistWorkspace(projects).then(setStorageMode);
   }, [projects, hydrated]);
+
+  useEffect(() => {
+    if (!hydrated || !window.location.search) return;
+    const capture = parseShareTarget(window.location.search);
+    if (!capture) return;
+    const project = createProject(capture.title, 'document');
+    const source: GlyphindSource = {
+      id: `source-share-${Date.now()}`,
+      kind: capture.url ? 'url' : 'text',
+      ...(capture.url ? { url: capture.url } : {}),
+      title: capture.title,
+      capturedAt: new Date().toISOString(),
+      ...(capture.text ? { fragment: capture.text.slice(0, 280) } : {}),
+      generatedBy: 'user',
+    };
+    const sharedProject: Project = {
+      ...project,
+      name: capture.title,
+      nodes: [],
+      edges: [],
+      pages: [{ id: 'page-main', title: 'Página principal', nodeIds: [], edgeIds: [] }],
+      sources: [source],
+      data: { ...project.data, document: formatSharedDocument(capture) },
+    };
+    setProjects((current) => [sharedProject, ...current]);
+    setFilter('all');
+    setSearch('');
+    window.history.replaceState({}, '', `${window.location.pathname}${window.location.hash}`);
+    setToast('Contenido compartido guardado localmente con su fuente');
+    openProject(sharedProject);
+  }, [hydrated]);
 
   useEffect(() => {
     if (!toast) return;
