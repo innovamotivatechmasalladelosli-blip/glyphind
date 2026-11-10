@@ -67,7 +67,8 @@
 - [x] Extracción HTML usa DOMParser en documento inerte, descarta elementos activos/embebidos y limita la fuente a 2 MB; importación de archivos limita a 10 MB.
 - [x] El workflow `.github/workflows/ci.yml` automatiza typecheck, suite de pruebas y build en pushes y pull requests.
 - [x] `npm run typecheck`, `npm test` (52 pruebas) y `npm run build` pasan localmente con IA, generación desde texto, PNG y scroll táctil móvil.
-- [x] CI y GitHub Pages se verificaron para el commit previo `d74ef4c`; la ejecución remota de esta mejora debe comprobarse después del nuevo push.
+- [x] CI (run `42858873126`) y GitHub Pages (run `42858868611`) terminaron con éxito para `7caa41a`; la URL pública responde HTTP 200.
+- [x] Smoke test en la página pública: URL CORS bloqueada lleva a consentimiento, el Worker entrega texto para análisis local y se crea un mapa editable con dos hallazgos y sus fuentes; la descarga PNG es válida y mide 2400×1600.
 - [x] Matriz comparativa con opciones/criterios/celdas editables, ciclo con orden y cierre explícito, y conjuntos A/B con pertenencia e intersección editables; sus estructuras y referencias de página se guardan localmente, CSV/Markdown exportan datos semánticos y JSON conserva relaciones de ciclo/página.
 - [x] Tablero: columnas editables/reordenables, límites WIP y traslado de tarjetas; cronograma: duración y dependencias acíclicas. UI probada en desktop y móvil.
 - [x] Canvas grande: ventana de hasta 80 nodos, navegación por vistas, conexiones entre ventanas indicadas y datos completos intactos; Playwright probó 181 nodos y preservación del documento.
