@@ -1,9 +1,13 @@
 import { StrictMode, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 import { analyzeLocally, localAiModes } from './ai/localAi';
-import { createEdgesFromNodes, createWorkspaceEnvelope, migrateProjects, type DiagramNode, type EdgeDirection, type GlyphindEdge, type GlyphindSource, type NodeShape, type Project, type ProjectData, type Slide, type BoardCard, type BoardColumn, type TimelineItem } from './domain/model';
+import { createEdgesFromNodes, createWorkspaceEnvelope, migrateProjects, type DiagramNode, type EdgeDirection, type EdgePort, type GlyphindEdge, type GlyphindSource, type GlyphindOperationChange, type NodeShape, type Project, type ProjectData, type Slide, type BoardCard, type BoardColumn, type TimelineItem } from './domain/model';
 import { exportExcalidraw, exportMermaid, importExcalidraw, importMarkdown, importMermaid, readFormatPlugins, writeFormatPlugins, type FormatPlugin } from './domain/formats';
 import { loadWorkspace, persistWorkspace } from './storage/workspace';
+import { collectProjectDiff, describeProjectChange, mergeDiffs } from './domain/history';
+import { exportProjectSvg } from './domain/svg';
+import { applyLocalTemplate as applyTemplateProject, createLocalTemplate, readLocalTemplates, writeLocalTemplates, type LocalTemplate } from './domain/templates';
+import { formatAdapterRegistry } from './domain/format-adapters';
 import type { LocalAnalysisMode, LocalAnalysisResult } from './workers/analysis.worker';
 import { AnalysisReview, OutlinePanel } from './components/local-panels';
 import './styles.css';
@@ -12,7 +16,7 @@ type IconName =
   | 'menu' | 'plus' | 'grid' | 'folder' | 'flow' | 'checklist' | 'team' | 'community'
   | 'archive' | 'search' | 'filter' | 'more' | 'edit' | 'copy' | 'trash' | 'arrow'
   | 'close' | 'back' | 'save' | 'share' | 'add' | 'command' | 'chevron' | 'spark';
-type ExportFormat = 'markdown' | 'json' | 'glyphind' | 'csv' | 'svg' | 'mermaid' | 'excalidraw';
+type ExportFormat = string;
 
 type DiagramType = {
   id: string;
@@ -221,9 +225,15 @@ function formatDate(timestamp: number) {
   return `Hace ${days} días`;
 }
 
-function connectorPath(from: DiagramNode, to: DiagramNode) {
-  const middleX = (from.x + to.x) / 2;
-  return `M${from.x} ${from.y} C${middleX} ${from.y}, ${middleX} ${to.y}, ${to.x} ${to.y}`;
+function connectorPath(from: DiagramNode, to: DiagramNode, fromPort: EdgePort = 'auto', toPort: EdgePort = 'auto') {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const sourceSide = fromPort === 'auto' ? (Math.abs(dx) >= Math.abs(dy) ? (dx >= 0 ? 'right' : 'left') : (dy >= 0 ? 'bottom' : 'top')) : fromPort;
+  const targetSide = toPort === 'auto' ? (Math.abs(dx) >= Math.abs(dy) ? (dx >= 0 ? 'left' : 'right') : (dy >= 0 ? 'top' : 'bottom')) : toPort;
+  const anchor = (node: DiagramNode, side: EdgePort) => ({ x: node.x + (side === 'right' ? 5 : side === 'left' ? -5 : 0), y: node.y + (side === 'bottom' ? 6 : side === 'top' ? -6 : 0) });
+  const start = anchor(from, sourceSide); const end = anchor(to, targetSide);
+  const middleX = (start.x + end.x) / 2;
+  return `M${start.x} ${start.y} C${middleX} ${start.y}, ${middleX} ${end.y}, ${end.x} ${end.y}`;
 }
 
 function shapeForNode(projectType: string, node: DiagramNode, index: number): NodeShape {
@@ -272,8 +282,9 @@ function connectorEdges(project: Project) {
 const extractionStopWords = new Set('para con las los una uno que del por sus más como este esta desde entre sobre donde cuando cómo qué son'.split(' '));
 
 function extractInformation(raw: string) {
+  if (raw.length > 2_000_000) throw new Error('El contenido HTML supera el límite de 2 MB.');
   const document = new DOMParser().parseFromString(raw, 'text/html');
-  document.querySelectorAll('script,style,noscript,svg,nav,footer').forEach((element) => element.remove());
+  document.querySelectorAll('script,style,noscript,svg,nav,footer,iframe,object,embed,form,input,button,textarea,select,template,link,meta,base,img,video,audio,source,track,picture,[hidden],[aria-hidden="true"]').forEach((element) => element.remove());
   const title = document.querySelector('title, h1')?.textContent?.trim() || 'Información extraída';
   const sections = Array.from(document.querySelectorAll('h1,h2,h3')).map((element) => element.textContent?.trim()).filter(Boolean).slice(0, 8) as string[];
   const paragraphs = Array.from(document.querySelectorAll('p,li')).map((element) => element.textContent?.replace(/\s+/g, ' ').trim()).filter((text): text is string => Boolean(text && text.length > 30)).slice(0, 16);
@@ -346,17 +357,11 @@ function safeFilename(name: string) {
   return name.toLowerCase().replace(/[^a-z0-9áéíóúñ]+/gi, '-').replace(/^-|-$/g, '') || 'glyphind-proyecto';
 }
 
-function escapeXml(value: string) {
-  return value.replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[character]!);
-}
-
-function safeSvgColor(value: string | undefined, fallback: string) {
-  return value && /^#[\da-f]{3}(?:[\da-f]{3})?$/i.test(value) ? value : fallback;
-}
-
 function downloadProject(project: Project, format: ExportFormat = 'markdown') {
   const type = typeFor(project.type);
   const baseName = safeFilename(project.name);
+  const registeredAdapter = formatAdapterRegistry.get(format);
+  if (registeredAdapter?.serialize) { const extension = registeredAdapter.extensions[0]; downloadFile(registeredAdapter.serialize(project), `${baseName}.${extension}`, registeredAdapter.mime); return; }
   if (format === 'json') {
     downloadFile(JSON.stringify(project, null, 2), `${baseName}.json`, 'application/json;charset=utf-8');
     return;
@@ -372,9 +377,7 @@ function downloadProject(project: Project, format: ExportFormat = 'markdown') {
     return;
   }
   if (format === 'svg') {
-    const nodes = project.nodes.map((node, index) => `<g transform="translate(${node.x * 8},${node.y * 5})"><rect x="-65" y="-25" width="130" height="50" rx="${shapeForNode(project.type, node, index) === 'circle' ? 25 : 8}" fill="#fffefa" stroke="${type.color}"/><text x="0" y="0" text-anchor="middle" dominant-baseline="middle" font-family="Arial" font-size="11" fill="#24231f">${escapeXml(node.label)}</text></g>`).join('');
-    const links = connectorEdges(project).map(({ from, to, edge }) => `<path d="${connectorPath(from, to).replace(/(\d+(?:\.\d+)?)/g, (value) => String(Number(value) * (value === String(from.x) || value === String(to.x) ? 8 : 5)))}" fill="none" stroke="${safeSvgColor(edge.style?.color, '#c9c6bd')}" ${edge.style?.dashed === false ? '' : 'stroke-dasharray="4 4"'}/>`).join('');
-    downloadFile(`<svg xmlns="http://www.w3.org/2000/svg" width="800" height="500" viewBox="0 0 800 500"><rect width="100%" height="100%" fill="#fdfcf8"/>${links}${nodes}</svg>`, `${baseName}.svg`, 'image/svg+xml;charset=utf-8');
+    downloadFile(exportProjectSvg(project), `${baseName}.svg`, 'image/svg+xml;charset=utf-8');
     return;
   }
   if (format === 'mermaid') {
@@ -430,7 +433,7 @@ function App() {
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [draftName, setDraftName] = useState('');
   const [draftType, setDraftType] = useState('flow');
-  const [localTemplates, setLocalTemplates] = useState<Array<{ id: string; name: string; type: string; nodes: DiagramNode[]; edges: GlyphindEdge[] }>>(() => { try { return JSON.parse(localStorage.getItem('glyphind-local-templates-v1') || '[]'); } catch { return []; } });
+  const [localTemplates, setLocalTemplates] = useState<LocalTemplate[]>(() => readLocalTemplates(localStorage));
   const [formatPlugins, setFormatPlugins] = useState<FormatPlugin[]>(() => readFormatPlugins());
   const [showTemplateManager, setShowTemplateManager] = useState(false);
   const [showPluginManager, setShowPluginManager] = useState(false);
@@ -493,11 +496,34 @@ function App() {
       const operations = project.history ?? [];
       const last = operations[operations.length - 1];
       const now = Date.now();
-      const history = last && last.summary === summary && now - Date.parse(last.at) < 800
-        ? [...operations.slice(0, -1), { ...last, at: new Date(now).toISOString() }]
-        : [...operations, { id: `op-${now}`, at: new Date(now).toISOString(), type: 'edit', summary }].slice(-100);
+      const changes = collectProjectDiff(project, next);
+      const canCoalesce = last && last.summary === summary && now - Date.parse(last.at) < 800;
+      const mergedChanges = canCoalesce ? mergeDiffs(last.changes ?? [], changes) : changes;
+      const operation = { id: canCoalesce ? last.id : `op-${now}`, at: new Date(now).toISOString(), type: 'edit', summary, changes: mergedChanges };
+      const history = canCoalesce ? [...operations.slice(0, -1), operation] : [...operations, operation].slice(-100);
       return { ...next, history };
     }));
+  };
+
+  const persistTemplateList = (next: LocalTemplate[]) => {
+    try { writeLocalTemplates(next, localStorage); setLocalTemplates(next); return true; }
+    catch (error) { setToast(error instanceof Error ? error.message : 'No se pudo guardar la plantilla local'); return false; }
+  };
+  const saveCurrentTemplate = (source: Project | null = activeProject, name = templateName) => {
+    if (!source) { setToast('Abre un proyecto para guardar una plantilla'); return; }
+    try {
+      const entry = createLocalTemplate(source, name.trim() || source.name);
+      if (persistTemplateList([...localTemplates, entry])) { setTemplateName(''); setToast('Plantilla guardada solo en este dispositivo'); }
+    } catch (error) { setToast(error instanceof Error ? error.message : 'No se pudo guardar la plantilla'); }
+  };
+  const applyDashboardTemplate = (template: LocalTemplate) => {
+    if (!activeProject) { setToast('Abre el proyecto donde quieras aplicar la plantilla'); return; }
+    try { updateProject(activeProject.id, applyTemplateProject(activeProject, template)); setToast(`Plantilla «${template.name}» aplicada`); }
+    catch (error) { setToast(error instanceof Error ? error.message : 'No se pudo aplicar la plantilla'); }
+  };
+  const removeLocalTemplate = (id: string) => {
+    const next = localTemplates.filter((template) => template.id !== id);
+    if (persistTemplateList(next)) setToast('Plantilla eliminada del dispositivo');
   };
 
   const submitProject = (event: FormEvent) => {
@@ -564,43 +590,32 @@ function App() {
     setToast('Proyecto eliminado del dispositivo');
   };
 
-  const importFile = (file: File) => {
+  const importFile = (file: File, additionalFiles = 0) => {
     if (!file) return;
+    const additionalNotice = additionalFiles > 0 ? ` (se importó este archivo; quedan ${additionalFiles} archivo(s) por importar)` : '';
+    if (file.size > 10_000_000) { setToast('El archivo supera el límite de importación de 10 MB.' + additionalNotice); return; }
     const reader = new FileReader();
     reader.onload = () => {
       try {
         const raw = String(reader.result);
         const extension = file.name.split('.').pop()?.toLowerCase();
-        if (extension === 'mmd' || extension === 'mermaid') {
-          const project = importMermaid(raw, file.name.replace(/\.(mmd|mermaid)$/i, ''));
+        const adapter = extension ? formatAdapterRegistry.byExtension(extension) : undefined;
+        if (adapter?.parse) {
+          const project = adapter.parse(raw, file.name);
           setProjects((current) => [project, ...current]);
           setFilter('all');
           setSearch('');
-          setToast(`Mermaid importado: ${project.nodes.length} nodos y ${project.edges.length} conectores`);
-          return;
-        }
-        if (extension === 'md' || extension === 'markdown') {
-          const project = importMarkdown(raw, file.name);
-          setProjects((current) => [project, ...current]);
-          setFilter('all');
-          setSearch('');
-          setToast(`Markdown importado: ${project.nodes.length} elementos reconocidos`);
-          return;
-        }
-        if (extension === 'excalidraw') {
-          const project = importExcalidraw(raw, file.name);
-          setProjects((current) => [project, ...current]);
-          setFilter('all');
-          setSearch('');
-          setToast(`Excalidraw importado: ${project.nodes.length} elementos y ${project.edges.length} conectores`);
+          setToast(`${adapter.name} importado: ${project.nodes.length} elementos y ${project.edges.length} conectores${additionalNotice}`);
           return;
         }
         const parsed = JSON.parse(raw);
         if (parsed?.format === 'glyphind-plugin' && Array.isArray(parsed.plugins)) {
-          const merged = [...formatPlugins, ...parsed.plugins.map((plugin: FormatPlugin) => ({ ...plugin, enabled: Boolean(plugin.enabled) }))];
+          const incoming: FormatPlugin[] = (parsed.plugins as unknown[]).filter((plugin: unknown): plugin is FormatPlugin => Boolean(plugin && typeof plugin === 'object' && typeof (plugin as FormatPlugin).id === 'string' && typeof (plugin as FormatPlugin).name === 'string' && Array.isArray((plugin as FormatPlugin).extensions) && ((plugin as FormatPlugin).kind === 'importer' || (plugin as FormatPlugin).kind === 'exporter')));
+          const merged = [...formatPlugins, ...incoming.map((plugin) => ({ ...plugin, enabled: false }))];
           writeFormatPlugins(merged);
-          setFormatPlugins(readFormatPlugins());
-          setToast(`${parsed.plugins.length} plugin(s) de formato agregados como descriptores locales`);
+          const stored = readFormatPlugins();
+          setFormatPlugins(stored);
+          setToast(`${Math.max(0, stored.length - formatPlugins.length)} descriptor(es) local(es) válidos guardados; no habilitan parsers ni ejecutan código${additionalNotice}`);
           return;
         }
         const imported = parsed?.document ? [parsed.document] : (Array.isArray(parsed) ? parsed : parsed?.projects ?? (parsed?.nodes && parsed?.name ? [parsed] : undefined));
@@ -609,11 +624,12 @@ function App() {
         setProjects(normalized);
         setFilter('all');
         setSearch('');
-        setToast(`${normalized.length} proyectos restaurados con esquema Glyphind v1`);
-      } catch {
-        setToast('No se pudo importar el respaldo');
+        setToast(`${normalized.length} proyectos restaurados con esquema Glyphind v1${additionalNotice}`);
+      } catch (error) {
+        setToast((error instanceof Error ? error.message : 'No se pudo importar el archivo') + additionalNotice);
       }
     };
+    reader.onerror = () => setToast('No se pudo leer el archivo seleccionado.' + additionalNotice);
     reader.readAsText(file);
   };
   const importWorkspace = (event: ChangeEvent<HTMLInputElement>) => {
@@ -624,13 +640,17 @@ function App() {
 
   if (activeView === 'editor' && activeProject) {
     return (
+      <div className="editor-drop-zone" onDragOver={(event) => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); }} onDrop={(event) => { const files = event.dataTransfer.files; const file = files[0]; if (file) { event.preventDefault(); importFile(file, Math.max(0, files.length - 1)); } }}>
+        {toast && <div className="toast" role="status" aria-live="polite"><span className="toast-check">✓</span>{toast}</div>}
         <Editor
           project={activeProject}
           allProjects={projects}
           onBack={() => setActiveView('projects')}
         onChange={(nextProject) => updateProject(nextProject.id, nextProject)}
         onToast={setToast}
-      />
+        onTemplatesChange={setLocalTemplates}
+        />
+      </div>
     );
   }
 
@@ -650,9 +670,9 @@ function App() {
           </div>
         </nav>
         <div className="sidebar-bottom">
-          <div className="workspace-actions"><button className="sidebar-action" onClick={() => downloadWorkspace(projects)}><Icon name="arrow" size={14} /> Exportar respaldo</button><button className="sidebar-action" onClick={() => importInputRef.current?.click()}><Icon name="folder" size={14} /> Importar archivo</button><button className="sidebar-action" onClick={() => setShowTemplateManager((open) => !open)}>Plantillas locales ({localTemplates.length})</button><button className="sidebar-action" onClick={() => setShowPluginManager((open) => !open)}>Plugins de formato ({formatPlugins.length})</button><input ref={importInputRef} type="file" accept="application/vnd.glyphind+json,application/json,.json,.glyphind,.mmd,.mermaid,.md,.markdown,.excalidraw" hidden onChange={importWorkspace} /></div>
-          {showTemplateManager && <section className="local-manager" aria-label="Biblioteca de plantillas"><h3>Biblioteca local</h3><label className="field-label">Nombre de esta plantilla<input value={templateName} onChange={(event) => setTemplateName(event.target.value)} placeholder="Ej. Flujo de aprobación" /></label><button className="sidebar-action" onClick={() => { if (!activeProject) { setToast('Abre un lienzo para guardar una plantilla'); return; } const entry = { id: `template-${Date.now()}`, name: templateName.trim() || activeProject.name, type: activeProject.type, nodes: activeProject.nodes, edges: activeProject.edges }; const next = [...localTemplates, entry]; setLocalTemplates(next); localStorage.setItem('glyphind-local-templates-v1', JSON.stringify(next)); setTemplateName(''); setToast('Plantilla guardada solo en este dispositivo'); }}>Guardar proyecto actual como plantilla</button>{localTemplates.map((template) => <div className="local-manager-row" key={template.id}><span>{template.name} · {typeFor(template.type).label}</span><button className="sidebar-action" onClick={() => { if (!activeProject) { setToast('Abre el lienzo donde aplicar la plantilla'); return; } const nodes = template.nodes.map((node) => ({ ...node, id: `${node.id}-${Date.now()}` })); const idMap = new Map(template.nodes.map((node, index) => [node.id, nodes[index].id])); const edges = template.edges.map((edge) => ({ ...edge, id: `${edge.id}-${Date.now()}`, from: idMap.get(edge.from) ?? edge.from, to: idMap.get(edge.to) ?? edge.to })); updateProject(activeProject.id, { nodes, edges, type: template.type }); setToast('Plantilla local aplicada'); }}>Aplicar</button><button className="sidebar-action" onClick={() => { const next = localTemplates.filter((item) => item.id !== template.id); setLocalTemplates(next); localStorage.setItem('glyphind-local-templates-v1', JSON.stringify(next)); }}>Eliminar</button></div>)}</section>}
-          {showPluginManager && <section className="local-manager" aria-label="Plugins de formato"><h3>Extensiones registradas</h3><p>Estos descriptores son locales y nunca ejecutan scripts importados. Importa un archivo JSON de tipo glyphind-plugin para registrar un parser o exportador.</p>{formatPlugins.length ? formatPlugins.map((plugin) => <div className="local-manager-row" key={plugin.id}><span>{plugin.name} · .{plugin.extensions.join(', .')} · {plugin.kind}</span><button className="sidebar-action" onClick={() => { const next = formatPlugins.map((item) => item.id === plugin.id ? { ...item, enabled: !item.enabled } : item); writeFormatPlugins(next); setFormatPlugins(next); }}>{plugin.enabled ? 'Desactivar' : 'Activar'}</button><button className="sidebar-action" onClick={() => { const next = formatPlugins.filter((item) => item.id !== plugin.id); writeFormatPlugins(next); setFormatPlugins(next); }}>Eliminar</button></div>) : <p>No hay plugins instalados.</p>}<button className="sidebar-action" onClick={() => importInputRef.current?.click()}>Importar descriptor JSON</button></section>}
+          <div className="workspace-actions"><button className="sidebar-action" onClick={() => downloadWorkspace(projects)}><Icon name="arrow" size={14} /> Exportar respaldo</button><button className="sidebar-action" onClick={() => importInputRef.current?.click()}><Icon name="folder" size={14} /> Importar archivo</button><button className="sidebar-action" onClick={() => setShowTemplateManager((open) => !open)}>Plantillas locales ({localTemplates.length})</button><button className="sidebar-action" onClick={() => setShowPluginManager((open) => !open)}>Catálogo de formatos ({formatPlugins.length})</button><input ref={importInputRef} type="file" accept="application/vnd.glyphind+json,application/json,.json,.glyphind,.mmd,.mermaid,.md,.markdown,.excalidraw" hidden onChange={importWorkspace} /></div>
+          {showTemplateManager && <section className="local-manager" aria-label="Biblioteca de plantillas"><h3>Biblioteca local</h3><label className="field-label">Nombre de esta plantilla<input value={templateName} onChange={(event) => setTemplateName(event.target.value)} placeholder="Ej. Flujo de aprobación" /></label><button className="sidebar-action" onClick={() => saveCurrentTemplate()}>Guardar proyecto actual como plantilla</button>{localTemplates.map((template) => <div className="local-manager-row" key={template.id}><span>{template.name} · {typeFor(template.type).label}</span><button className="sidebar-action" onClick={() => applyDashboardTemplate(template)}>Aplicar</button><button className="sidebar-action" onClick={() => removeLocalTemplate(template.id)}>Eliminar</button></div>)}</section>}
+          {showPluginManager && <section className="local-manager" aria-label="Plugins de formato"><h3>Extensiones registradas</h3><p>Este catálogo guarda metadatos locales únicamente. Los descriptores importados no habilitan funciones de importación/exportación ni ejecutan código; los formatos disponibles siguen siendo los integrados en Glyphind.</p>{formatPlugins.length ? formatPlugins.map((plugin) => <div className="local-manager-row" key={plugin.id}><span>{plugin.name} · .{plugin.extensions.join(', .')} · {plugin.kind}</span><span className="plugin-status">Metadatos · sin ejecución</span><button className="sidebar-action" onClick={() => { const next = formatPlugins.filter((item) => item.id !== plugin.id); writeFormatPlugins(next); setFormatPlugins(next); }}>Eliminar</button></div>) : <p>No hay plugins instalados.</p>}<button className="sidebar-action" onClick={() => importInputRef.current?.click()}>Importar descriptor JSON</button></section>}
           <div className="sidebar-footnote"><span>G</span><span>Glyphind <em>0.1</em></span></div>
         </div>
       </aside>
@@ -717,7 +737,7 @@ function App() {
       </main>
 
       {modal && <ProjectModal mode={modal} name={draftName} type={draftType} setName={setDraftName} setType={setDraftType} onSubmit={submitProject} onClose={() => setModal(null)} />}
-      {toast && <div className="toast"><span className="toast-check">✓</span>{toast}</div>}
+      {toast && <div className="toast" role="status" aria-live="polite"><span className="toast-check">✓</span>{toast}</div>}
     </div>
   );
 }
@@ -739,13 +759,17 @@ function ProjectModal({ mode, name, type, setName, setType, onSubmit, onClose }:
 
 function ExportMenu({ project, onExport }: { project: Project; onExport: (format: ExportFormat) => void }) {
   const [open, setOpen] = useState(false);
-  const options: Array<[ExportFormat, string]> = [['glyphind', 'Archivo .glyphind'], ['markdown', 'Markdown'], ['mermaid', 'Mermaid (.mmd)'], ['excalidraw', 'Excalidraw (.excalidraw)'], ['json', 'JSON editable'], ['csv', 'CSV de elementos'], ['svg', 'SVG vectorial']];
+  const options: Array<[ExportFormat, string]> = [['glyphind', 'Archivo .glyphind'], ['markdown', 'Markdown'], ...formatAdapterRegistry.list().filter((adapter) => adapter.serialize).map((adapter) => [adapter.id, `${adapter.name} (.${adapter.extensions[0]})`] as [string, string]), ['json', 'JSON editable'], ['csv', 'CSV de elementos'], ['svg', 'SVG vectorial']];
   return <div className="export-menu"><button className="secondary-button" onClick={() => setOpen((value) => !value)} aria-expanded={open}><Icon name="arrow" size={14} /> Descargar <Icon name="chevron" size={14} /></button>{open && <div className="export-options">{options.map(([format, label]) => <button key={format} onClick={() => { onExport(format); setOpen(false); }}>{label}</button>)}</div>}</div>;
 }
 
 function WorkspaceFrame({ project, children, onBack, onExport }: { project: Project; children: React.ReactNode; onBack: () => void; onExport: (format: ExportFormat) => void }) {
   const type = typeFor(project.type);
   return <div className="editor-shell"><header className="editor-topbar"><button className="back-link" onClick={onBack}><Icon name="back" size={17} /> Volver a proyectos</button><div className="editor-breadcrumb"><span>/</span><span>{project.name}</span><span className="editor-type-pill" style={{ color: type.color, backgroundColor: type.soft }}><Icon name={type.icon} size={13} /> {type.label}</span></div><div className="editor-actions"><span className="saved-label"><span className="canvas-live-dot" /> Cambios activos</span><ExportMenu project={project} onExport={onExport} /></div></header><main className="specialized-main">{children}</main></div>;
+}
+
+function HistoryDock({ canUndo, canRedo, undo, redo, operations }: { canUndo: boolean; canRedo: boolean; undo: () => void; redo: () => void; operations: NonNullable<Project['history']> }) {
+  return <nav className="specialized-history-dock" aria-label="Historial de edición"><button className="secondary-button" onClick={undo} disabled={!canUndo} aria-label="Deshacer cambio">↶ Deshacer</button><button className="secondary-button" onClick={redo} disabled={!canRedo} aria-label="Rehacer cambio">↷ Rehacer</button><details className="history-details"><summary>Historial ({operations.length})</summary><ol>{operations.slice(-12).reverse().map((operation) => <li key={operation.id}><strong>{operation.summary}</strong><time dateTime={operation.at}>{new Date(operation.at).toLocaleString()}</time>{Boolean(operation.changes?.length) && <details className="operation-diff"><summary>Ver {operation.changes?.length} cambios</summary><ul>{operation.changes?.map((change, index) => <li key={`${change.entity}-${change.id}-${change.field}-${index}`}><b>{change.entity} · {change.field}</b><span><del>{change.before}</del><i aria-hidden="true"> → </i><ins>{change.after}</ins></span></li>)}</ul></details>}</li>)}</ol></details></nav>;
 }
 
 function DocumentEditor({ project, onBack, onChange, onToast }: { project: Project; onBack: () => void; onChange: (project: Project) => void; onToast: (message: string) => void }) {
@@ -830,20 +854,8 @@ function TimelineEditor({ project, onBack, onChange, onToast }: { project: Proje
   return <WorkspaceFrame project={project} onBack={onBack} onExport={(format) => { downloadProject(project, format); onToast('Cronograma descargado'); }}><div className="specialized-heading"><div><span className="section-kicker">Cronograma</span><h1>{project.name}</h1><p>Planifica fases, fechas, dependencias y entregables.</p></div><button className="secondary-button" onClick={add}><Icon name="plus" size={15} /> Añadir fase</button></div><div className="timeline-workspace">{items.map((item, index) => <article className="timeline-item" key={item.id}><span className="timeline-index">{index + 1}</span><div><input className="timeline-date" value={item.date} onChange={(event) => update(item.id, { date: event.target.value })} /><input className="timeline-title" value={item.title} onChange={(event) => update(item.id, { title: event.target.value })} /><textarea value={item.detail} onChange={(event) => update(item.id, { detail: event.target.value })} rows={2} /><div className="timeline-actions"><button onClick={() => move(index, -1)} disabled={index === 0} title="Subir fase"><Icon name="back" size={14} /> Subir</button><button onClick={() => move(index, 1)} disabled={index === items.length - 1} title="Bajar fase"><Icon name="arrow" size={14} /> Bajar</button><button onClick={() => duplicate(item)} title="Duplicar fase"><Icon name="copy" size={14} /> Duplicar</button><button className="delete-slide" onClick={() => remove(item.id)} disabled={items.length <= 1}><Icon name="trash" size={14} /> Eliminar</button></div></div></article>)}</div></WorkspaceFrame>;
 }
 
-function describeProjectChange(before: Project, after: Project) {
-  const changed: string[] = [];
-  if (before.name !== after.name) changed.push('nombre');
-  if (before.type !== after.type) changed.push('tipo de diagrama');
-  if (JSON.stringify(before.nodes) !== JSON.stringify(after.nodes)) changed.push('nodos');
-  if (JSON.stringify(before.edges) !== JSON.stringify(after.edges)) changed.push('conectores');
-  if (JSON.stringify(before.groups) !== JSON.stringify(after.groups)) changed.push('grupos');
-  if (JSON.stringify(before.pages) !== JSON.stringify(after.pages)) changed.push('páginas');
-  if (JSON.stringify(before.sources) !== JSON.stringify(after.sources)) changed.push('fuentes');
-  if (JSON.stringify(before.data) !== JSON.stringify(after.data)) changed.push('contenido');
-  return changed.length ? `Cambio en ${changed.join(', ')}` : 'Cambio del proyecto';
-}
 
-function Editor({ project, allProjects, onBack, onChange, onToast }: { project: Project; allProjects: Project[]; onBack: () => void; onChange: (project: Project) => void; onToast: (message: string) => void }) {
+function Editor({ project, allProjects, onBack, onChange, onToast, onTemplatesChange }: { project: Project; allProjects: Project[]; onBack: () => void; onChange: (project: Project) => void; onToast: (message: string) => void; onTemplatesChange: (templates: LocalTemplate[]) => void }) {
   const [selectedNodeId, setSelectedNodeId] = useState('');
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [outlineOpen, setOutlineOpen] = useState(false);
@@ -856,21 +868,26 @@ function Editor({ project, allProjects, onBack, onChange, onToast }: { project: 
   const [edgeTargetId, setEdgeTargetId] = useState('');
   const [edgeLabel, setEdgeLabel] = useState('');
   const [edgeDirection, setEdgeDirection] = useState<EdgeDirection>('forward');
-  const [savedTemplates, setSavedTemplates] = useState<Array<{ id: string; name: string; type: string; nodes: DiagramNode[]; edges: GlyphindEdge[] }>>(() => { try { return JSON.parse(localStorage.getItem('glyphind-local-templates-v1') || '[]'); } catch { return []; } });
+  const [edgeFromPort, setEdgeFromPort] = useState<EdgePort>('auto');
+  const [edgeToPort, setEdgeToPort] = useState<EdgePort>('auto');
+  const [savedTemplates, setSavedTemplates] = useState<LocalTemplate[]>(() => readLocalTemplates(localStorage));
   const [, refreshHistory] = useState(0);
-  const historyRef = useRef<{ projectId: string; past: Project[]; future: Project[]; present: Project; lastAt: number }>({ projectId: project.id, past: [], future: [], present: structuredClone(project), lastAt: 0 });
-  if (historyRef.current.projectId !== project.id) historyRef.current = { projectId: project.id, past: [], future: [], present: structuredClone(project), lastAt: 0 };
+  const historyRef = useRef<{ projectId: string; past: Project[]; future: Project[]; present: Project; lastAt: number; lastKey: string }>({ projectId: project.id, past: [], future: [], present: structuredClone(project), lastAt: 0, lastKey: '' });
+  if (historyRef.current.projectId !== project.id) historyRef.current = { projectId: project.id, past: [], future: [], present: structuredClone(project), lastAt: 0, lastKey: '' };
   else if (historyRef.current.present.updated !== project.updated && project.updated > historyRef.current.present.updated) historyRef.current.present = structuredClone(project);
-  const changeProject = (next: Project) => {
+  const changeProject = (next: Project, coalesceKey?: string) => {
     const history = historyRef.current;
     const previous = history.present;
     if (JSON.stringify({ ...previous, updated: 0 }) !== JSON.stringify({ ...next, updated: 0 })) {
       const now = Date.now();
-      if (now - history.lastAt > 700 || !history.past.length) history.past.push(structuredClone(previous));
+      const key = coalesceKey ?? JSON.stringify(collectProjectDiff(previous, next).map(({ entity, id, field }) => [entity, id, field]));
+      const canCoalesce = history.lastKey === key && (Boolean(coalesceKey) || now - history.lastAt <= 700);
+      if (!canCoalesce) history.past.push(structuredClone(previous));
       if (history.past.length > 80) history.past.shift();
       history.future = [];
       history.present = structuredClone(next);
       history.lastAt = now;
+      history.lastKey = key;
       refreshHistory((value) => value + 1);
     }
     onChange(next);
@@ -882,6 +899,7 @@ function Editor({ project, allProjects, onBack, onChange, onToast }: { project: 
     history.future.push(structuredClone(history.present));
     history.present = structuredClone(previous);
     history.lastAt = 0;
+    history.lastKey = '';
     changeProject(previous);
     onToast('Cambio deshecho');
   };
@@ -892,6 +910,7 @@ function Editor({ project, allProjects, onBack, onChange, onToast }: { project: 
     history.past.push(structuredClone(history.present));
     history.present = structuredClone(next);
     history.lastAt = 0;
+    history.lastKey = '';
     changeProject(next);
     onToast('Cambio rehecho');
   };
@@ -910,10 +929,10 @@ function Editor({ project, allProjects, onBack, onChange, onToast }: { project: 
   const type = typeFor(project.type);
   const selectedNode = project.nodes.find((node) => node.id === selectedNodeId);
 
-  if (project.type === 'document') return <DocumentEditor project={project} onBack={onBack} onChange={changeProject} onToast={onToast} />;
-  if (project.type === 'presentation') return <PresentationEditor project={project} allProjects={allProjects} onBack={onBack} onChange={changeProject} onToast={onToast} />;
-  if (project.type === 'board') return <BoardEditor project={project} onBack={onBack} onChange={changeProject} onToast={onToast} />;
-  if (project.type === 'timeline') return <TimelineEditor project={project} onBack={onBack} onChange={changeProject} onToast={onToast} />;
+  if (project.type === 'document') return <><DocumentEditor project={project} onBack={onBack} onChange={changeProject} onToast={onToast} /><HistoryDock canUndo={historyRef.current.past.length > 0} canRedo={historyRef.current.future.length > 0} undo={undo} redo={redo} operations={project.history ?? []} /></>;
+  if (project.type === 'presentation') return <><PresentationEditor project={project} allProjects={allProjects} onBack={onBack} onChange={changeProject} onToast={onToast} /><HistoryDock canUndo={historyRef.current.past.length > 0} canRedo={historyRef.current.future.length > 0} undo={undo} redo={redo} operations={project.history ?? []} /></>;
+  if (project.type === 'board') return <><BoardEditor project={project} onBack={onBack} onChange={changeProject} onToast={onToast} /><HistoryDock canUndo={historyRef.current.past.length > 0} canRedo={historyRef.current.future.length > 0} undo={undo} redo={redo} operations={project.history ?? []} /></>;
+  if (project.type === 'timeline') return <><TimelineEditor project={project} onBack={onBack} onChange={changeProject} onToast={onToast} /><HistoryDock canUndo={historyRef.current.past.length > 0} canRedo={historyRef.current.future.length > 0} undo={undo} redo={redo} operations={project.history ?? []} /></>;
 
   const updateNode = (patch: Partial<DiagramNode>) => {
     if (!selectedNode) return;
@@ -926,14 +945,21 @@ function Editor({ project, allProjects, onBack, onChange, onToast }: { project: 
       onToast('Ya existe un conector entre esos puertos');
       return;
     }
-    const edge: GlyphindEdge = { id: `edge-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, from: selectedNode.id, to: edgeTargetId, direction: edgeDirection, ...(edgeLabel.trim() ? { label: edgeLabel.trim(), relation: edgeLabel.trim() } : {}) };
+    const edge: GlyphindEdge = { id: `edge-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, from: selectedNode.id, to: edgeTargetId, direction: edgeDirection, fromPort: edgeFromPort, toPort: edgeToPort, ...(edgeLabel.trim() ? { label: edgeLabel.trim(), relation: edgeLabel.trim() } : {}) };
     const edges = [...project.edges, edge];
     changeProject({ ...project, edges, pages: project.pages.map((page) => ({ ...page, edgeIds: [...new Set([...page.edgeIds, edge.id])] })) });
     setEdgeLabel('');
     onToast('Conector manual creado');
   };
 
-  const updateEdge = (edgeId: string, patch: Partial<GlyphindEdge>) => changeProject({ ...project, edges: project.edges.map((edge) => edge.id === edgeId ? { ...edge, ...patch } : edge) });
+  const updateEdge = (edgeId: string, patch: Partial<GlyphindEdge>) => {
+    const current = project.edges.find((edge) => edge.id === edgeId);
+    if (!current) return;
+    const nextFrom = patch.from ?? current.from; const nextTo = patch.to ?? current.to;
+    if (nextFrom === nextTo || !project.nodes.some((node) => node.id === nextFrom) || !project.nodes.some((node) => node.id === nextTo)) { onToast('El conector necesita dos nodos distintos que existan'); return; }
+    if (project.edges.some((edge) => edge.id !== edgeId && edge.from === nextFrom && edge.to === nextTo)) { onToast('Ya existe un conector para ese par ordenado de nodos'); return; }
+    changeProject({ ...project, edges: project.edges.map((edge) => edge.id === edgeId ? { ...edge, ...patch, from: nextFrom, to: nextTo } : edge) });
+  };
 
   const removeEdge = (edgeId: string) => {
     const edges = project.edges.filter((edge) => edge.id !== edgeId);
@@ -1011,10 +1037,10 @@ function Editor({ project, allProjects, onBack, onChange, onToast }: { project: 
     const rect = event.currentTarget.getBoundingClientRect();
     const x = Math.max(5, Math.min(95, ((event.clientX - rect.left) / rect.width) * 100));
     const y = Math.max(5, Math.min(95, ((event.clientY - rect.top) / rect.height) * 100));
-    changeProject({ ...project, nodes: project.nodes.map((node) => node.id === id ? { ...node, x, y } : node) });
+    changeProject({ ...project, nodes: project.nodes.map((node) => node.id === id ? { ...node, x, y } : node) }, `drag:${id}`);
   };
 
-  const stopMovingNode = () => { draggingNodeRef.current = null; };
+  const stopMovingNode = () => { draggingNodeRef.current = null; historyRef.current.lastKey = ''; historyRef.current.lastAt = 0; };
 
   const canvasOrganizerTypes = diagramTypes.filter((item) => ['flow', 'concept', 'mindmap', 'matrix', 'pyramid', 'cycle', 'venn', 'custom'].includes(item.id));
   const changeCanvasFormat = (nextType: string) => {
@@ -1035,20 +1061,23 @@ function Editor({ project, allProjects, onBack, onChange, onToast }: { project: 
   };
 
   const saveLocalTemplate = () => {
-    const entry = { id: `template-${Date.now()}`, name: project.name, type: project.type, nodes: project.nodes, edges: project.edges };
-    const next = [...savedTemplates, entry];
-    setSavedTemplates(next);
-    localStorage.setItem('glyphind-local-templates-v1', JSON.stringify(next));
-    onToast('Plantilla guardada solo en este dispositivo');
+    try {
+      const entry = createLocalTemplate(project);
+      const next = [...savedTemplates, entry];
+      writeLocalTemplates(next, localStorage);
+      setSavedTemplates(next);
+      onTemplatesChange(next);
+      onToast('Plantilla guardada solo en este dispositivo');
+    } catch (error) { onToast(error instanceof Error ? error.message : 'No se pudo guardar la plantilla'); }
   };
 
-  const applyLocalTemplate = (template: typeof savedTemplates[number]) => {
-    const nodes = template.nodes.map((node) => ({ ...node, id: `${node.id}-${Date.now()}` }));
-    const idMap = new Map(template.nodes.map((node, index) => [node.id, nodes[index].id]));
-    const edges = template.edges.map((edge) => ({ ...edge, id: `${edge.id}-${Date.now()}`, from: idMap.get(edge.from) ?? edge.from, to: idMap.get(edge.to) ?? edge.to }));
-    changeProject({ ...project, type: template.type, nodes, edges, pages: [{ id: `page-${Date.now()}`, title: 'Página principal', nodeIds: nodes.map((node) => node.id), edgeIds: edges.map((edge) => edge.id) }], sources: [] });
-    setSelectedNodeId(nodes[0]?.id ?? '');
-    onToast(`Plantilla «${template.name}» aplicada`);
+  const applyLocalTemplate = (template: LocalTemplate) => {
+    try {
+      const next = applyTemplateProject(project, template);
+      changeProject(next);
+      setSelectedNodeId(next.nodes[0]?.id ?? '');
+      onToast(`Plantilla «${template.name}» aplicada`);
+    } catch (error) { onToast(error instanceof Error ? error.message : 'No se pudo aplicar la plantilla'); }
   };
 
   const analyzeNodeInformation = async () => {
@@ -1121,7 +1150,7 @@ function Editor({ project, allProjects, onBack, onChange, onToast }: { project: 
   return (
     <div className="editor-shell canvas-editor-shell">
       <header className="editor-topbar"><button className="back-link" onClick={onBack}><Icon name="back" size={17} /> Proyectos</button><div className="editor-breadcrumb"><span>/</span><span>{project.name}</span><span className="editor-type-pill" style={{ color: type.color, backgroundColor: type.soft }}><Icon name={type.icon} size={13} /> {type.label}</span></div><div className="editor-actions"><span className="saved-label"><span className="canvas-live-dot" /> Guardado local</span><ExportMenu project={project} onExport={(format) => { downloadProject(project, format); onToast('Diagrama descargado'); }} /></div></header>
-      <main className="editor-main canvas-editor-main"><div className="editor-heading"><div><span className="section-kicker">Lienzo de composición</span><h1>{project.name}</h1><p>Resume, conecta y transforma información en un organizador visual.</p></div><div className="canvas-format-tools"><label>Formato<select value={project.type} onChange={(event) => changeCanvasFormat(event.target.value)}>{canvasOrganizerTypes.map((item) => <option value={item.id} key={item.id}>{item.label}</option>)}</select></label><button className="secondary-button" onClick={applyTemplate}><Icon name="spark" size={15} /> Plantilla inicial</button><button className="secondary-button" onClick={saveLocalTemplate}>Guardar en biblioteca</button>{savedTemplates.length > 0 && <label className="template-picker">Mis plantillas<select aria-label="Aplicar plantilla guardada" defaultValue="" onChange={(event) => { const template = savedTemplates.find((item) => item.id === event.target.value); if (template) applyLocalTemplate(template); event.currentTarget.value = ""; }}><option value="">Elegir…</option>{savedTemplates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}</select></label>}</div></div><div className={`editor-workspace canvas-full-workspace ${inspectorOpen ? '' : 'inspector-is-closed'}`}><section className="canvas-section"><div className="canvas-header"><span><span className="canvas-live-dot" /> Lienzo de trabajo</span><span className="canvas-help">Desliza para ver el resto del diagrama; arrastra para mover nodos.</span>{!inspectorOpen && <button className="reopen-inspector" onClick={() => setInspectorOpen(true)}>Abrir propiedades <Icon name="arrow" size={13} /></button>}<button className="outline-toggle" onClick={() => setOutlineOpen((open) => !open)} aria-expanded={outlineOpen}><Icon name="command" size={13} /> {outlineOpen ? 'Ocultar esquema' : 'Vista de esquema'}</button><div className="history-controls"><button className="outline-toggle" onClick={undo} disabled={!historyRef.current.past.length} aria-label="Deshacer cambio (Ctrl o Cmd+Z)" title="Deshacer · Ctrl/Cmd+Z">↶ Deshacer</button><button className="outline-toggle" onClick={redo} disabled={!historyRef.current.future.length} aria-label="Rehacer cambio (Ctrl o Cmd+Shift+Z)" title="Rehacer · Ctrl/Cmd+Shift+Z">↷ Rehacer</button><details className="history-details"><summary>Historial ({project.history?.length ?? 0})</summary><ol>{(project.history ?? []).slice(-12).reverse().map((operation) => <li key={operation.id}><strong>{operation.summary}</strong><time dateTime={operation.at}>{new Date(operation.at).toLocaleString()}</time></li>)}</ol></details></div></div><div className={`diagram-canvas ${gridVisible ? '' : 'grid-is-hidden'}`} onClick={() => setSelectedNodeId('')} onPointerMove={moveNode} onPointerUp={stopMovingNode} onPointerCancel={stopMovingNode}><div className="canvas-zoom-layer" style={{ transform: `scale(${zoom / 100})` }}><svg className="canvas-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><defs><marker id="glyphind-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#9d9a91" /></marker></defs>{connectorEdges(project).map(({ edge, from, to }) => <g key={edge.id}><path d={connectorPath(from, to)} markerEnd={edge.direction === "forward" || edge.direction === "both" ? "url(#glyphind-arrow)" : undefined} markerStart={edge.direction === "backward" || edge.direction === "both" ? "url(#glyphind-arrow)" : undefined} />{(edge.label || edge.relation) && <text className="edge-label" x={(from.x + to.x) / 2} y={(from.y + to.y) / 2 - 2}>{edge.label || edge.relation}</text>}</g>)}</svg>{project.nodes.map((node, index) => <button key={node.id} className={`diagram-node node-${node.tone} shape-${shapeForNode(project.type, node, index)} ${selectedNode?.id === node.id ? 'is-selected' : ''}`} style={{ left: `${node.x}%`, top: `${node.y}%`, borderLeftColor: colorForNode(node) }} onPointerDown={(event) => { event.stopPropagation(); setSelectedNodeId(node.id); draggingNodeRef.current = node.id; event.currentTarget.setPointerCapture(event.pointerId); }} aria-label={`${node.label}. ${node.detail}`} onClick={(event) => { event.stopPropagation(); setSelectedNodeId(node.id); }}><span className="node-grip"><i /><i /><i /></span><strong>{node.label}</strong><small>{node.detail}</small></button>)}</div></div><div className="canvas-footer"><span>{project.nodes.length} elementos · {zoom}%</span><span>Arrastra para mover · selecciona para editar</span></div></section>{inspectorOpen && <aside className="properties-panel"><div className="properties-head"><div><span className="section-kicker">Propiedades</span><h2>Editar selección</h2></div><button className="icon-button" aria-label="Cerrar propiedades" onClick={() => setInspectorOpen(false)}><Icon name="close" size={16} /></button></div>{selectedNode ? <div className="properties-content"><div className="selected-preview" style={{ backgroundColor: type.soft, color: type.color }}><Icon name={type.icon} size={21} /><span>{type.label}</span></div><label className="field-label">Título<input value={selectedNode.label} onChange={(event) => updateNode({ label: event.target.value })} /></label><label className="field-label">Descripción<textarea value={selectedNode.detail} onChange={(event) => updateNode({ detail: event.target.value })} rows={4} /></label><details className="advanced-source-tools"><summary>Fuentes y resumen avanzado</summary><label className="field-label">Fuente web (URL)<input type="url" value={selectedNode.sourceUrl ?? ''} onChange={(event) => updateNode({ sourceUrl: event.target.value })} placeholder="https://sitio.com/articulo" /></label><label className="field-label">Contenido fuente<textarea value={selectedNode.content ?? ''} onChange={(event) => updateNode({ content: event.target.value })} rows={4} placeholder="Pega aquí texto o HTML para resumirlo." /></label><button className="extract-button" onClick={analyzeNodeInformation} disabled={extracting}><Icon name="spark" size={15} /> {extracting ? 'Analizando en Worker…' : `Analizar con ${localAiModes[aiMode].label}`}</button></details><details className="advanced-source-tools connector-editor"><summary>Conectores ({project.edges.filter((edge) => edge.from === selectedNode.id || edge.to === selectedNode.id).length})</summary><label className="field-label">Puerto de destino<select value={edgeTargetId} onChange={(event) => setEdgeTargetId(event.target.value)}><option value="">Selecciona un elemento…</option>{project.nodes.filter((node) => node.id !== selectedNode.id).map((node) => <option value={node.id} key={node.id}>{node.label}</option>)}</select></label><label className="field-label">Etiqueta del conector<input value={edgeLabel} onChange={(event) => setEdgeLabel(event.target.value)} placeholder="p. ej. depende de" /></label><label className="field-label">Dirección<select value={edgeDirection} onChange={(event) => setEdgeDirection(event.target.value as EdgeDirection)}><option value="forward">Desde el seleccionado → destino</option><option value="backward">Destino → seleccionado</option><option value="both">Ambos sentidos</option><option value="none">Sin flecha</option></select></label><button className="extract-button" onClick={createManualEdge} disabled={!edgeTargetId}><Icon name="add" size={14} /> Crear conector</button><div className="connector-list">{project.edges.filter((edge) => edge.from === selectedNode.id || edge.to === selectedNode.id).map((edge) => <div className="connector-row" key={edge.id}><strong>{project.nodes.find((node) => node.id === edge.from)?.label} → {project.nodes.find((node) => node.id === edge.to)?.label}</strong><input aria-label="Etiqueta del conector" value={edge.label ?? edge.relation ?? ""} onChange={(event) => updateEdge(edge.id, { label: event.target.value, relation: event.target.value })} placeholder="Sin etiqueta" /><select aria-label="Dirección del conector" value={edge.direction} onChange={(event) => updateEdge(edge.id, { direction: event.target.value as EdgeDirection })}><option value="forward">→</option><option value="backward">←</option><option value="both">↔</option><option value="none">—</option></select><button className="delete-element" onClick={() => removeEdge(edge.id)} aria-label="Eliminar conector"><Icon name="trash" size={13} /></button></div>)}</div></details><label className="field-label">Forma<select value={shapeForNode(project.type, selectedNode, project.nodes.findIndex((node) => node.id === selectedNode.id))} onChange={(event) => updateNode({ shape: event.target.value as NodeShape })}><option value="card">Tarjeta</option><option value="circle">Círculo</option><option value="pill">Píldora</option><option value="diamond">Decisión</option><option value="hexagon">Hexágono</option></select></label><div className="color-picker-field"><span className="field-label">Color</span><ColorWheel value={colorForNode(selectedNode)} onChange={(color) => updateNode({ colorHex: color })} /><div className="color-swatches">{Object.entries(toneColors).map(([tone, color]) => <button type="button" key={tone} className="color-swatch" style={{ backgroundColor: color }} aria-label={`Usar color ${tone}`} onClick={() => updateNode({ tone, colorHex: color })} />)}</div></div><div className="property-actions"><button className="delete-element" onClick={duplicateNode}><Icon name="copy" size={15} /> Duplicar</button><button className="delete-element" onClick={deleteNode} disabled={project.nodes.length <= 1}><Icon name="trash" size={15} /> Eliminar</button></div></div> : <div className="properties-empty"><span><Icon name="command" size={23} /></span><p>Selecciona un elemento para editarlo.</p></div>}<button className="add-element-button" onClick={addNode}><Icon name="plus" size={15} /> Añadir elemento</button></aside>}{outlineOpen && <OutlinePanel project={project} selectedNodeId={selectedNodeId} onSelect={(id) => { setSelectedNodeId(id); setInspectorOpen(true); }} onClose={() => setOutlineOpen(false)} />}</div><aside className="canvas-tools"><div className="tool-group"><span className="tool-label">Editar</span><button className="tool-button is-active" title="Seleccionar elemento"><Icon name="command" /><span>Seleccionar</span></button><button className="tool-button" title="Añadir elemento" onClick={addNode}><Icon name="add" /><span>Añadir</span></button><button className="tool-button" title="Duplicar elemento" onClick={duplicateNode} disabled={!selectedNode}><Icon name="copy" /><span>Duplicar</span></button><button className="tool-button" title="Eliminar elemento" onClick={deleteNode} disabled={!selectedNode || project.nodes.length <= 1}><Icon name="trash" /><span>Eliminar</span></button></div><div className="tools-line" /><div className="tool-group"><span className="tool-label">Organizar</span><button className="tool-button" title="Ordenar automáticamente" onClick={fitCanvas}><Icon name="flow" /><span>Ordenar</span></button><button className="tool-button shape-tool shape-card-tool" title="Aplicar forma cuadro" onClick={() => setSelectedShape('card')}><span>Cuadro</span></button><button className="tool-button shape-tool shape-pill-tool" title="Aplicar forma pastilla" onClick={() => setSelectedShape('pill')}><span>Pastilla</span></button></div><div className="tools-line" /><div className="tool-group tool-group-view"><span className="tool-label">Vista</span><div className="zoom-controls"><button className="tool-button" title="Alejar" onClick={() => updateZoom(-25)} disabled={zoom <= 50}>−</button><button className="zoom-value zoom-button" title="Restablecer zoom" onClick={resetZoom}>{zoom}%</button><button className="tool-button" title="Acercar" onClick={() => updateZoom(25)} disabled={zoom >= 175}>+</button></div></div></aside>{analysis && <AnalysisReview result={analysis} error={analysisError} mode={aiMode} onModeChange={setAiMode} onAccept={acceptAnalysis} onDiscard={() => { setAnalysis(null); setAnalysisError(''); }} />}</main>
+      <main className="editor-main canvas-editor-main"><div className="editor-heading"><div><span className="section-kicker">Lienzo de composición</span><h1>{project.name}</h1><p>Resume, conecta y transforma información en un organizador visual.</p></div><div className="canvas-format-tools"><label>Formato<select value={project.type} onChange={(event) => changeCanvasFormat(event.target.value)}>{canvasOrganizerTypes.map((item) => <option value={item.id} key={item.id}>{item.label}</option>)}</select></label><button className="secondary-button" onClick={applyTemplate}><Icon name="spark" size={15} /> Plantilla inicial</button><button className="secondary-button" onClick={saveLocalTemplate}>Guardar en biblioteca</button>{savedTemplates.length > 0 && <label className="template-picker">Mis plantillas<select aria-label="Aplicar plantilla guardada" defaultValue="" onChange={(event) => { const template = savedTemplates.find((item) => item.id === event.target.value); if (template) applyLocalTemplate(template); event.currentTarget.value = ""; }}><option value="">Elegir…</option>{savedTemplates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}</select></label>}</div></div><div className={`editor-workspace canvas-full-workspace ${inspectorOpen ? '' : 'inspector-is-closed'}`}><section className="canvas-section"><div className="canvas-header"><span><span className="canvas-live-dot" /> Lienzo de trabajo</span><span className="canvas-help">Desliza para ver el resto del diagrama; arrastra para mover nodos.</span>{!inspectorOpen && <button className="reopen-inspector" onClick={() => setInspectorOpen(true)}>Abrir propiedades <Icon name="arrow" size={13} /></button>}<button className="outline-toggle" onClick={() => setOutlineOpen((open) => !open)} aria-expanded={outlineOpen}><Icon name="command" size={13} /> {outlineOpen ? 'Ocultar esquema' : 'Vista de esquema'}</button><div className="history-controls"><button className="outline-toggle" onClick={undo} disabled={!historyRef.current.past.length} aria-label="Deshacer cambio (Ctrl o Cmd+Z)" title="Deshacer · Ctrl/Cmd+Z">↶ Deshacer</button><button className="outline-toggle" onClick={redo} disabled={!historyRef.current.future.length} aria-label="Rehacer cambio (Ctrl o Cmd+Shift+Z)" title="Rehacer · Ctrl/Cmd+Shift+Z">↷ Rehacer</button><details className="history-details"><summary>Historial ({project.history?.length ?? 0})</summary><ol>{(project.history ?? []).slice(-12).reverse().map((operation) => <li key={operation.id}><strong>{operation.summary}</strong><time dateTime={operation.at}>{new Date(operation.at).toLocaleString()}</time>{Boolean(operation.changes?.length) && <details className="operation-diff"><summary>Ver {operation.changes?.length} cambios</summary><ul>{operation.changes?.map((change, index) => <li key={`${change.entity}-${change.id}-${change.field}-${index}`}><b>{change.entity} · {change.field}</b><span><del>{change.before}</del><i aria-hidden="true"> → </i><ins>{change.after}</ins></span></li>)}</ul></details>}</li>)}</ol></details></div></div><div className={`diagram-canvas ${gridVisible ? '' : 'grid-is-hidden'}`} onClick={() => setSelectedNodeId('')} onPointerMove={moveNode} onPointerUp={stopMovingNode} onPointerCancel={stopMovingNode}><div className="canvas-zoom-layer" style={{ transform: `scale(${zoom / 100})` }}><svg className="canvas-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><defs><marker id="glyphind-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#9d9a91" /></marker></defs>{connectorEdges(project).map(({ edge, from, to }) => <g key={edge.id}><path d={connectorPath(from, to, edge.fromPort, edge.toPort)} markerEnd={edge.direction === "forward" || edge.direction === "both" ? "url(#glyphind-arrow)" : undefined} markerStart={edge.direction === "backward" || edge.direction === "both" ? "url(#glyphind-arrow)" : undefined} />{(edge.label || edge.relation) && <text className="edge-label" x={(from.x + to.x) / 2} y={(from.y + to.y) / 2 - 2}>{edge.label || edge.relation}</text>}</g>)}</svg>{project.nodes.map((node, index) => <button key={node.id} className={`diagram-node node-${node.tone} shape-${shapeForNode(project.type, node, index)} ${selectedNode?.id === node.id ? 'is-selected' : ''}`} style={{ left: `${node.x}%`, top: `${node.y}%`, borderLeftColor: colorForNode(node) }} onPointerDown={(event) => { event.stopPropagation(); setSelectedNodeId(node.id); draggingNodeRef.current = node.id; event.currentTarget.setPointerCapture(event.pointerId); }} aria-label={`${node.label}. ${node.detail}`} onClick={(event) => { event.stopPropagation(); setSelectedNodeId(node.id); }}><span className="node-grip"><i /><i /><i /></span><strong>{node.label}</strong><small>{node.detail}</small></button>)}</div></div><div className="canvas-footer"><span>{project.nodes.length} elementos · {zoom}%</span><span>Arrastra para mover · selecciona para editar</span></div></section>{inspectorOpen && <aside className="properties-panel"><div className="properties-head"><div><span className="section-kicker">Propiedades</span><h2>Editar selección</h2></div><button className="icon-button" aria-label="Cerrar propiedades" onClick={() => setInspectorOpen(false)}><Icon name="close" size={16} /></button></div>{selectedNode ? <div className="properties-content"><div className="selected-preview" style={{ backgroundColor: type.soft, color: type.color }}><Icon name={type.icon} size={21} /><span>{type.label}</span></div><label className="field-label">Título<input value={selectedNode.label} onChange={(event) => updateNode({ label: event.target.value })} /></label><label className="field-label">Descripción<textarea value={selectedNode.detail} onChange={(event) => updateNode({ detail: event.target.value })} rows={4} /></label><details className="advanced-source-tools"><summary>Fuentes y resumen avanzado</summary><label className="field-label">Fuente web (URL)<input type="url" value={selectedNode.sourceUrl ?? ''} onChange={(event) => updateNode({ sourceUrl: event.target.value })} placeholder="https://sitio.com/articulo" /></label><label className="field-label">Contenido fuente<textarea value={selectedNode.content ?? ''} onChange={(event) => updateNode({ content: event.target.value })} rows={4} placeholder="Pega aquí texto o HTML para resumirlo." /></label><button className="extract-button" onClick={analyzeNodeInformation} disabled={extracting}><Icon name="spark" size={15} /> {extracting ? 'Analizando en Worker…' : `Analizar con ${localAiModes[aiMode].label}`}</button></details><details className="advanced-source-tools connector-editor"><summary>Conectores ({project.edges.filter((edge) => edge.from === selectedNode.id || edge.to === selectedNode.id).length})</summary><label className="field-label">Nodo de destino<select value={edgeTargetId} onChange={(event) => setEdgeTargetId(event.target.value)}><option value="">Selecciona un elemento…</option>{project.nodes.filter((node) => node.id !== selectedNode.id).map((node) => <option value={node.id} key={node.id}>{node.label}</option>)}</select></label><label className="field-label">Puerto de origen<select value={edgeFromPort} onChange={(event) => setEdgeFromPort(event.target.value as EdgePort)}><option value="auto">Automático</option><option value="top">Superior</option><option value="right">Derecho</option><option value="bottom">Inferior</option><option value="left">Izquierdo</option></select></label><label className="field-label">Puerto de destino<select value={edgeToPort} onChange={(event) => setEdgeToPort(event.target.value as EdgePort)}><option value="auto">Automático</option><option value="top">Superior</option><option value="right">Derecho</option><option value="bottom">Inferior</option><option value="left">Izquierdo</option></select></label><label className="field-label">Etiqueta del conector<input value={edgeLabel} onChange={(event) => setEdgeLabel(event.target.value)} placeholder="p. ej. depende de" /></label><label className="field-label">Dirección<select value={edgeDirection} onChange={(event) => setEdgeDirection(event.target.value as EdgeDirection)}><option value="forward">Desde el seleccionado → destino</option><option value="backward">Destino → seleccionado</option><option value="both">Ambos sentidos</option><option value="none">Sin flecha</option></select></label><button className="extract-button" onClick={createManualEdge} disabled={!edgeTargetId}><Icon name="add" size={14} /> Crear conector</button><div className="connector-list">{project.edges.filter((edge) => edge.from === selectedNode.id || edge.to === selectedNode.id).map((edge) => <div className="connector-row" key={edge.id}><strong>{project.nodes.find((node) => node.id === edge.from)?.label} → {project.nodes.find((node) => node.id === edge.to)?.label}</strong><input aria-label="Etiqueta del conector" value={edge.label ?? edge.relation ?? ""} onChange={(event) => updateEdge(edge.id, { label: event.target.value, relation: event.target.value })} placeholder="Sin etiqueta" /><select aria-label="Dirección del conector" value={edge.direction} onChange={(event) => updateEdge(edge.id, { direction: event.target.value as EdgeDirection })}><option value="forward">→</option><option value="backward">←</option><option value="both">↔</option><option value="none">—</option></select><select aria-label="Puerto de origen del conector" value={edge.fromPort ?? 'auto'} onChange={(event) => updateEdge(edge.id, { fromPort: event.target.value as EdgePort })}><option value="auto">A: Auto</option><option value="top">A: Arriba</option><option value="right">A: Derecha</option><option value="bottom">A: Abajo</option><option value="left">A: Izquierda</option></select><select aria-label="Puerto de destino del conector" value={edge.toPort ?? 'auto'} onChange={(event) => updateEdge(edge.id, { toPort: event.target.value as EdgePort })}><option value="auto">B: Auto</option><option value="top">B: Arriba</option><option value="right">B: Derecha</option><option value="bottom">B: Abajo</option><option value="left">B: Izquierda</option></select><button className="delete-element" onClick={() => removeEdge(edge.id)} aria-label="Eliminar conector"><Icon name="trash" size={13} /></button></div>)}</div></details><label className="field-label">Forma<select value={shapeForNode(project.type, selectedNode, project.nodes.findIndex((node) => node.id === selectedNode.id))} onChange={(event) => updateNode({ shape: event.target.value as NodeShape })}><option value="card">Tarjeta</option><option value="circle">Círculo</option><option value="pill">Píldora</option><option value="diamond">Decisión</option><option value="hexagon">Hexágono</option></select></label><div className="color-picker-field"><span className="field-label">Color</span><ColorWheel value={colorForNode(selectedNode)} onChange={(color) => updateNode({ colorHex: color })} /><div className="color-swatches">{Object.entries(toneColors).map(([tone, color]) => <button type="button" key={tone} className="color-swatch" style={{ backgroundColor: color }} aria-label={`Usar color ${tone}`} onClick={() => updateNode({ tone, colorHex: color })} />)}</div></div><div className="property-actions"><button className="delete-element" onClick={duplicateNode}><Icon name="copy" size={15} /> Duplicar</button><button className="delete-element" onClick={deleteNode} disabled={project.nodes.length <= 1}><Icon name="trash" size={15} /> Eliminar</button></div></div> : <div className="properties-empty"><span><Icon name="command" size={23} /></span><p>Selecciona un elemento para editarlo.</p></div>}<button className="add-element-button" onClick={addNode}><Icon name="plus" size={15} /> Añadir elemento</button></aside>}{outlineOpen && <OutlinePanel project={project} selectedNodeId={selectedNodeId} onSelect={(id) => { setSelectedNodeId(id); setInspectorOpen(true); }} onClose={() => setOutlineOpen(false)} />}</div><aside className="canvas-tools"><div className="tool-group"><span className="tool-label">Editar</span><button className="tool-button is-active" title="Seleccionar elemento"><Icon name="command" /><span>Seleccionar</span></button><button className="tool-button" title="Añadir elemento" onClick={addNode}><Icon name="add" /><span>Añadir</span></button><button className="tool-button" title="Duplicar elemento" onClick={duplicateNode} disabled={!selectedNode}><Icon name="copy" /><span>Duplicar</span></button><button className="tool-button" title="Eliminar elemento" onClick={deleteNode} disabled={!selectedNode || project.nodes.length <= 1}><Icon name="trash" /><span>Eliminar</span></button></div><div className="tools-line" /><div className="tool-group"><span className="tool-label">Organizar</span><button className="tool-button" title="Ordenar automáticamente" onClick={fitCanvas}><Icon name="flow" /><span>Ordenar</span></button><button className="tool-button shape-tool shape-card-tool" title="Aplicar forma cuadro" onClick={() => setSelectedShape('card')}><span>Cuadro</span></button><button className="tool-button shape-tool shape-pill-tool" title="Aplicar forma pastilla" onClick={() => setSelectedShape('pill')}><span>Pastilla</span></button></div><div className="tools-line" /><div className="tool-group tool-group-view"><span className="tool-label">Vista</span><div className="zoom-controls"><button className="tool-button" title="Alejar" onClick={() => updateZoom(-25)} disabled={zoom <= 50}>−</button><button className="zoom-value zoom-button" title="Restablecer zoom" onClick={resetZoom}>{zoom}%</button><button className="tool-button" title="Acercar" onClick={() => updateZoom(25)} disabled={zoom >= 175}>+</button></div></div></aside>{analysis && <AnalysisReview result={analysis} error={analysisError} mode={aiMode} onModeChange={setAiMode} onAccept={acceptAnalysis} onDiscard={() => { setAnalysis(null); setAnalysisError(''); }} />}</main>
     </div>
   );
 }

@@ -17,6 +17,7 @@ export type DiagramNode = {
 };
 
 export type EdgeDirection = 'none' | 'forward' | 'backward' | 'both';
+export type EdgePort = 'auto' | 'top' | 'right' | 'bottom' | 'left';
 
 export type GlyphindEdge = {
   id: string;
@@ -24,6 +25,8 @@ export type GlyphindEdge = {
   to: string;
   relation?: string;
   direction: EdgeDirection;
+  fromPort?: EdgePort;
+  toPort?: EdgePort;
   label?: string;
   confidence?: number;
   style?: { color?: string; dashed?: boolean };
@@ -45,7 +48,8 @@ export type GlyphindSource = {
 
 export type GlyphindGroup = { id: string; label: string; nodeIds: string[]; color?: string };
 export type GlyphindPage = { id: string; title: string; nodeIds: string[]; edgeIds: string[] };
-export type GlyphindOperation = { id: string; at: string; type: string; summary: string };
+export type GlyphindOperationChange = { entity: string; id: string; field: string; before: string; after: string };
+export type GlyphindOperation = { id: string; at: string; type: string; summary: string; changes?: GlyphindOperationChange[] };
 
 export type Slide = { id: string; title: string; body: string; diagramProjectId?: string };
 export type BoardCard = { id: string; title: string; detail: string };
@@ -116,6 +120,8 @@ function normalizeEdge(input: Partial<GlyphindEdge>, index: number, nodes: Diagr
     from,
     to,
     direction,
+    ...(input.fromPort === 'top' || input.fromPort === 'right' || input.fromPort === 'bottom' || input.fromPort === 'left' ? { fromPort: input.fromPort } : {}),
+    ...(input.toPort === 'top' || input.toPort === 'right' || input.toPort === 'bottom' || input.toPort === 'left' ? { toPort: input.toPort } : {}),
     ...(input.relation ? { relation: String(input.relation) } : {}),
     ...(input.label ? { label: String(input.label) } : {}),
     ...(typeof input.confidence === 'number' ? { confidence: Math.max(0, Math.min(1, input.confidence)) } : {}),

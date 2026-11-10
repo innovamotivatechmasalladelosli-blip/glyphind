@@ -37,29 +37,34 @@
 - [x] Los paneles de evidencia y esquema se convierten en bottom sheets en pantallas pequeñas.
 - [x] Se respeta `prefers-reduced-motion` para eliminar movimientos no esenciales.
 - [x] Se ajustó la barra de herramientas del canvas para permanecer flotante y utilizable en escritorio y móvil; en anchos menores el canvas ofrece desplazamiento horizontal y una indicación visible para encontrar el resto del diagrama.
-- [x] Las acciones rápidas del dashboard se apilan en móvil; se comprobó que la página no desborda horizontalmente a 320, 390, 768 y 1440 px.
+- [x] Las acciones rápidas del dashboard se apilan en móvil; dashboard, editor y menú de exportación se comprobaron sin overflow a 320, 390, 768 y 1440 px.
 
 ## Verificación de entrega
 
 - [x] `npm run typecheck` termina sin errores.
-- [x] `npm test` cubre migración v1, validación de edges y sobre reversible.
+- [x] `npm test` ejecuta 26 pruebas de migración, formatos, adaptadores, edges/puertos, historial/diffs, SVG seguro y plantillas.
 - [x] `npm run build` genera la SPA, el Worker de análisis, los artefactos WASM de Transformers.js, el manifiesto y el Service Worker.
 - [x] El repositorio canónico de GitHub se utilizó como fuente de trabajo y conserva el flujo de build estático.
 
 ## Estado real de las integraciones y trabajo aún pendiente
 
-- [x] Importación/exportación básica de Mermaid y Excalidraw, con pruebas de round-trip para nodos y conectores; no todos los metadatos o construcciones específicas de cada formato se preservan.
-- [x] Importación de Markdown y arrastrar/soltar archivos admitidos desde el dashboard.
-- [x] Biblioteca local inicial de plantillas: guardar un proyecto como plantilla y aplicarlo desde el editor.
-- [x] Editor manual inicial de conectores con nodo de origen/destino, etiqueta y dirección. Los «puertos» aún equivalen a elegir nodos; no hay anclajes de conexión nombrados por lado.
-- [x] Build de producción, pruebas y typecheck corren localmente; las diez pruebas actuales pasan.
-- [ ] Completar undo/redo semántico para todas las vistas y controles, y mostrar diffs antes/después reales; el historial actual es un resumen de operaciones del canvas, no un comparador visual completo.
-- [ ] Completar la API y ejecución segura de plugins para parsers/exportadores; hoy sólo se registran descriptores locales, sin ejecutar ni despachar extensiones.
-- [ ] Añadir layouts especializados y editores semánticos completos para matrices, ciclos, conjuntos, cronogramas y tableros; el layout existente no cubre todas esas estructuras.
+- [x] Mermaid soporta un subconjunto explícito de flowcharts; importa/exporta forward, backward, both y none con etiquetas escapadas. Construcciones fuera del subconjunto se rechazan con error, no se ignoran silenciosamente.
+- [x] Excalidraw importa/exporta formas, texto, etiquetas, direcciones, colores y metadatos de Glyphind; preserva puertos cardinales a través de `customData`.
+- [x] Markdown se importa como documento editable, conserva el origen, omite fenced code y limita la generación de elementos a 200.
+- [x] Arrastrar/soltar archivos admitidos funciona en dashboard y editor. Se importa un archivo por operación y hay límite de 10 MB.
+- [x] Biblioteca local de plantillas versionada, validada, migrable desde el formato anterior, limitada por tamaño y con remapeo de IDs/referencias. Aplicar preserva identidad e historial del proyecto destino.
+- [x] Undo/redo semántico por snapshots disponible en canvas, documentos, presentaciones, tableros y cronogramas; soporta agrupación de escritura/arrastre y un máximo de 80 snapshots por sesión.
+- [x] Historial visible guarda diffs antes/después por campo y muestra las 12 operaciones más recientes tanto en canvas como en editores especializados; el registro persistido conserva hasta 100 operaciones por proyecto.
+- [x] El editor manual de conectores permite destino, etiqueta, dirección, puerto de origen/destino (auto, superior, derecho, inferior o izquierdo), edición de puertos y eliminación; se validan endpoints y duplicados.
+- [x] Exportación SVG autocontenida con escaping XML, whitelist de color, formas, flechas, etiquetas y puertos probados.
+- [x] API de adaptadores compilados para parsers/exportadores con registro tipado, despacho por extensión y opciones de exportación. Los JSON importados sólo agregan metadatos: nunca cargan ni evalúan código arbitrario por seguridad.
+- [x] Extracción HTML usa DOMParser en documento inerte, descarta elementos activos/embebidos y limita la fuente a 2 MB; importación de archivos limita a 10 MB.
+- [x] El workflow `.github/workflows/ci.yml` automatiza typecheck, suite de pruebas y build en pushes y pull requests.
+- [x] `npm run typecheck` y `npm test` pasan; la suite cubre formatos, diffs, adaptadores, seguridad SVG y plantillas locales.
+- [ ] Ejecutar y confirmar el workflow en GitHub Actions después de publicar; el token usado anteriormente no tenía permiso `workflows`, por lo que puede requerirse actualizar permisos para el push.
+- [ ] Añadir layouts especializados y editores semánticos completos para matrices, ciclos y conjuntos; los editores de tablero y cronograma existentes aún necesitan mejoras de estructura y dependencias.
 - [ ] Virtualizar canvas grandes y validar carga/rendimiento con proyectos de referencia.
 - [ ] Implementar captura móvil desde la acción Compartir del sistema operativo.
-- [ ] Completar sanitización de HTML y SVG de extremo a extremo, agregar pruebas de seguridad y revisar los límites de importación/exportación.
-- [ ] Crear CI automático en GitHub Actions. El primer intento de publicar el workflow fue rechazado por falta del permiso `workflows` del token de GitHub.
 - [ ] Hacer pruebas prácticas con TalkBack y VoiceOver; las etiquetas ARIA existentes no sustituyen esas verificaciones.
 - [ ] Evaluar colaboración opt-in con Yjs/WebRTC sólo después de definir conflictos, permisos y datos que salen del dispositivo.
 - [ ] Validar recuperación tras cierre abrupto y rendimiento p95 en móviles reales.

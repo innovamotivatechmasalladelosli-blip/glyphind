@@ -28,13 +28,15 @@ test('conserva relaciones explícitas y descarta endpoints inválidos', () => {
     type: 'concept',
     nodes: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }],
     edges: [
-      { id: 'valid', from: 'a', to: 'b', direction: 'both', relation: 'influye' },
+      { id: 'valid', from: 'a', to: 'b', direction: 'both', relation: 'influye', fromPort: 'bottom', toPort: 'left' },
       { id: 'invalid', from: 'a', to: 'missing', direction: 'forward' },
     ],
   });
   assert.equal(project.edges.length, 1);
   assert.equal(project.edges[0].relation, 'influye');
   assert.equal(project.edges[0].direction, 'both');
+  assert.equal(project.edges[0].fromPort, 'bottom');
+  assert.equal(project.edges[0].toPort, 'left');
 });
 
 test('crea sobre reversible con schemaVersion', () => {

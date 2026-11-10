@@ -1,4 +1,4 @@
-import type { DiagramNode, EdgeDirection, GlyphindEdge, Project } from './model';
+import type { DiagramNode, EdgeDirection, EdgePort, GlyphindEdge, Project } from './model';
 
 export type FormatPlugin = {
   id: string;
@@ -9,25 +9,48 @@ export type FormatPlugin = {
 };
 
 const PLUGIN_REGISTRY_KEY = 'glyphind-format-plugins-v1';
+const MAX_PLUGIN_DESCRIPTORS = 100;
+const MAX_PLUGIN_REGISTRY_BYTES = 100_000;
+const normalizePlugin = (item: unknown): FormatPlugin | null => {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
+  const plugin = item as Partial<FormatPlugin>;
+  if (typeof plugin.id !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,63}$/i.test(plugin.id) || typeof plugin.name !== 'string' || !plugin.name.trim() || plugin.name.length > 160 || !Array.isArray(plugin.extensions) || plugin.extensions.length < 1 || plugin.extensions.length > 10 || !plugin.extensions.every((extension) => typeof extension === 'string' && /^[a-z0-9]{1,12}$/i.test(extension)) || (plugin.kind !== 'importer' && plugin.kind !== 'exporter')) return null;
+  const extensions = [...new Set(plugin.extensions.map((extension) => extension.toLowerCase()))];
+  if (extensions.length !== plugin.extensions.length) return null;
+  return { id: plugin.id, name: plugin.name.trim().slice(0, 80), extensions, kind: plugin.kind, enabled: false };
+};
 
-/** Portable plugin registry for parser/exporter descriptors; it never evals imported scripts. */
+/** Portable metadata only. This registry never loads or evaluates imported scripts. */
 export function readFormatPlugins(storage: Pick<Storage, 'getItem'> = localStorage): FormatPlugin[] {
   try {
-    const parsed: unknown = JSON.parse(storage.getItem(PLUGIN_REGISTRY_KEY) || '[]');
+    const raw = storage.getItem(PLUGIN_REGISTRY_KEY) || '[]';
+    if (raw.length > MAX_PLUGIN_REGISTRY_BYTES) return [];
+    const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.flatMap((item): FormatPlugin[] => {
-      if (!item || typeof item !== 'object') return [];
-      const plugin = item as Partial<FormatPlugin>;
-      if (typeof plugin.id !== 'string' || typeof plugin.name !== 'string' || !Array.isArray(plugin.extensions) || !plugin.extensions.every((extension) => typeof extension === 'string' && /^[a-z0-9]+$/i.test(extension)) || (plugin.kind !== 'importer' && plugin.kind !== 'exporter')) return [];
-      return [{ id: plugin.id, name: plugin.name.slice(0, 80), extensions: plugin.extensions.map((extension) => extension.toLowerCase()), kind: plugin.kind, enabled: Boolean(plugin.enabled) }];
-    });
-  } catch {
-    return [];
-  }
+    const result: FormatPlugin[] = [];
+    const ids = new Set<string>();
+    for (const entry of parsed.slice(0, MAX_PLUGIN_DESCRIPTORS)) {
+      const plugin = normalizePlugin(entry);
+      if (!plugin || ids.has(plugin.id)) continue;
+      ids.add(plugin.id);
+      result.push(plugin);
+    }
+    return result;
+  } catch { return []; }
 }
 
 export function writeFormatPlugins(plugins: FormatPlugin[], storage: Pick<Storage, 'setItem'> = localStorage): void {
-  storage.setItem(PLUGIN_REGISTRY_KEY, JSON.stringify(plugins.filter((plugin) => plugin && typeof plugin.id === 'string' && typeof plugin.name === 'string' && Array.isArray(plugin.extensions) && plugin.extensions.every((extension) => /^[a-z0-9]+$/i.test(extension)) && (plugin.kind === 'importer' || plugin.kind === 'exporter')).map((plugin) => ({ ...plugin, extensions: plugin.extensions.map((extension) => extension.toLowerCase()) }))));
+  const result: FormatPlugin[] = [];
+  const ids = new Set<string>();
+  for (const item of plugins.slice(0, MAX_PLUGIN_DESCRIPTORS)) {
+    const plugin = normalizePlugin(item);
+    if (!plugin || ids.has(plugin.id)) continue;
+    ids.add(plugin.id);
+    result.push(plugin);
+  }
+  const serialized = JSON.stringify(result);
+  if (serialized.length > MAX_PLUGIN_REGISTRY_BYTES) throw new RangeError('El catálogo de descriptores excede el límite local permitido.');
+  storage.setItem(PLUGIN_REGISTRY_KEY, serialized);
 }
 
 const slug = (value: string, fallback: string) => {
@@ -79,7 +102,7 @@ export function importMermaid(source: string, name = 'Diagrama Mermaid'): Projec
       continue;
     }
     const normalizedLine = line.replace(/(-->|==>)\s*\|([^|]*)\|/g, (_match, arrow: string, label: string) => arrow.startsWith('--') ? `--|${label}|-->` : `==|${label}|==>`);
-    const edgePattern = /([\w.-]+\s*(?:\(\[[\s\S]*?\]\)|\(\([^)]*?\)\)|\[\[[\s\S]*?\]\]|\[[\s\S]*?\]|\([^)]*\)|\{[^}]*\})?)\s*(-->|---|==>|-.->|--\s*\|([^|]*)\|\s*-->|==\s*\|([^|]*)\|\s*==>|-\.\s*([^.]*)\s*\.->)\s*([\w.-]+\s*(?:\(\[[\s\S]*?\]\)|\(\([^)]*?\)\)|\[\[[\s\S]*?\]\]|\[[\s\S]*?\]|\([^)]*\)|\{[^}]*\})?)/g;
+    const edgePattern = /([\w.-]+\s*(?:\(\[[\s\S]*?\]\)|\(\([^)]*?\)\)|\[\[[\s\S]*?\]\]|\[[\s\S]*?\]|\([^)]*\)|\{[^}]*\})?)\s*(<-->|<--|-->|---|==>|-.->|--\s*\|([^|]*)\|\s*-->|==\s*\|([^|]*)\|\s*==>|-\.\s*([^.]*)\s*\.->)\s*([\w.-]+\s*(?:\(\[[\s\S]*?\]\)|\(\([^)]*?\)\)|\[\[[\s\S]*?\]\]|\[[\s\S]*?\]|\([^)]*\)|\{[^}]*\})?)/g;
     let matched = false;
     let cursor = 0;
     for (const match of normalizedLine.matchAll(edgePattern)) {
@@ -97,7 +120,7 @@ export function importMermaid(source: string, name = 'Diagrama Mermaid'): Projec
         from: left.id,
         to: right.id,
         ...(match[3] || match[4] || match[5] ? { label: plainLabel(match[3] ?? match[4] ?? match[5]) } : {}),
-        direction: arrow.includes('>') ? 'forward' : 'none',
+        direction: arrow === '<--' ? 'backward' : arrow === '<-->' ? 'both' : arrow.includes('>') ? 'forward' : 'none',
       });
     }
     const remainder = normalizedLine.slice(cursor).trim();
@@ -148,8 +171,8 @@ export function importMermaid(source: string, name = 'Diagrama Mermaid'): Projec
 }
 
 function mermaidText(value: string): string {
-  // Mermaid labels are always emitted as quoted text; remove markup and active syntax.
-  return plainLabel(value).replace(/["`]/g, "'").replace(/[\[\]{}|]/g, ' ').replace(/\s+/g, ' ').trim() || 'Sin título';
+  // Quoted labels are escaped to prevent accidental Mermaid syntax injection.
+  return plainLabel(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/[\r\n]/g, ' ').replace(/\s+/g, ' ').trim() || 'Sin título';
 }
 
 /** Exports Glyphind's explicit graph as a conservative Mermaid flowchart. */
@@ -173,8 +196,9 @@ export function exportMermaid(project: Project): string {
     const to = ids.get(edge.to);
     if (!from || !to || from === to) continue;
     const label = mermaidText(edge.label || edge.relation || '');
-    const arrow = edge.direction === 'none' ? '---' : '-->';
-    lines.push(`  ${from} ${arrow}${label !== 'Sin título' ? `| ${label} |` : ''} ${arrow === '---' ? '' : ''}${to}`.replace(/\s+/g, ' ').trim());
+    const arrow = edge.direction === 'none' ? '---' : edge.direction === 'backward' ? '<--' : edge.direction === 'both' ? '<-->' : '-->';
+    const directed = arrow === '<--' ? `${to} <--${label !== 'Sin título' ? `| ${label} |` : ''} ${from}` : `${from} ${arrow}${label !== 'Sin título' ? `| ${label} |` : ''} ${to}`;
+    lines.push(`  ${directed}`.replace(/\s+/g, ' ').trim());
   }
   return `${lines.join('\n')}\n`;
 }
@@ -182,13 +206,21 @@ export function exportMermaid(project: Project): string {
 export function importMarkdown(source: string, name = 'Documento Markdown'): Project {
   if (source.length > 2_000_000) throw new Error('El archivo Markdown supera el límite de 2 MB.');
   const content = source.replace(/^\uFEFF/, '');
-  const heading = content.match(/^#\s+(.+)$/m)?.[1]?.trim();
   const lines = content.split(/\r?\n/);
-  const candidates = lines.flatMap((line) => {
+  const visibleLines: string[] = [];
+  let fence: string | null = null;
+  for (const line of lines) {
+    const marker = line.match(/^\s*(`{3,}|~{3,})/);
+    if (marker) { if (!fence) fence = marker[1][0]; else if (marker[1][0] === fence) fence = null; continue; }
+    if (!fence) visibleLines.push(line);
+  }
+  const heading = visibleLines.map((line) => line.match(/^#\s+(.+)$/)?.[1]?.trim()).find(Boolean);
+  const candidates = visibleLines.flatMap((line) => {
     const match = line.match(/^\s*(?:#{1,6}\s+|[-*+]\s+|\d+[.)]\s+)(.+)$/);
     return match ? [plainLabel(match[1])] : [];
   }).filter(Boolean);
-  const labels = [...new Set(candidates)].slice(0, 200);
+  if (!candidates.length) throw new Error('El Markdown no contiene encabezados o elementos de lista importables fuera de bloques de código.');
+  const labels = candidates.slice(0, 200);
   const nodes: DiagramNode[] = labels.map((label, index) => ({
     id: `markdown-${index + 1}`,
     label: label.slice(0, 240),
@@ -225,7 +257,7 @@ export function importExcalidraw(source: string, name = 'Dibujo Excalidraw'): Pr
   const document = JSON.parse(source) as { type?: unknown; elements?: unknown };
   if (document?.type !== 'excalidraw' || !Array.isArray(document.elements)) throw new Error('El archivo no parece un documento Excalidraw válido.');
   if (document.elements.length > 5000) throw new Error('El dibujo supera el límite de 5 000 elementos.');
-  const elements = document.elements.filter((item): item is ExcalidrawElement => Boolean(item && typeof item === 'object' && typeof (item as ExcalidrawElement).id === 'string' && typeof (item as ExcalidrawElement).type === 'string' && Number.isFinite((item as ExcalidrawElement).x) && Number.isFinite((item as ExcalidrawElement).y) && !(item as ExcalidrawElement).isDeleted));
+  const elements = document.elements.filter((item): item is ExcalidrawElement => Boolean(item && typeof item === 'object' && typeof (item as ExcalidrawElement).id === 'string' && typeof (item as ExcalidrawElement).type === 'string' && Number.isFinite((item as ExcalidrawElement).x) && Number.isFinite((item as ExcalidrawElement).y) && Math.abs((item as ExcalidrawElement).x) < 1_000_000 && Math.abs((item as ExcalidrawElement).y) < 1_000_000 && !(item as ExcalidrawElement).isDeleted));
   const shapes = elements.filter((element) => ['rectangle', 'ellipse', 'diamond', 'text'].includes(element.type));
   const textByContainer = new Map(elements.filter((element) => element.type === 'text' && typeof element.containerId === 'string').map((element) => [element.containerId!, plainLabel(String(element.text ?? ''))]));
   const visibleShapes = shapes.filter((element) => element.type !== 'text' || !element.containerId);
@@ -240,11 +272,12 @@ export function importExcalidraw(source: string, name = 'Dibujo Excalidraw'): Pr
   const nodes: DiagramNode[] = visibleShapes.map((element, index) => ({
     id: `excalidraw-${slug(element.id, `node_${index + 1}`)}`,
     label: textByContainer.get(element.id) || plainLabel(String(element.text ?? element.originalText ?? element.id)) || `Elemento ${index + 1}`,
-    detail: '',
+    detail: typeof element.customData === 'object' && element.customData !== null && typeof (element.customData as Record<string, unknown>).glyphindDetail === 'string' ? String((element.customData as Record<string, unknown>).glyphindDetail) : '',
     x: 8 + ((element.x - minX) / spanX) * 84,
     y: 8 + ((element.y - minY) / spanY) * 84,
-    tone: ['blue', 'lilac', 'green', 'orange'][index % 4],
-    shape: element.type === 'ellipse' ? 'circle' : element.type === 'diamond' ? 'diamond' : 'card',
+    tone: typeof element.customData === 'object' && element.customData !== null && typeof (element.customData as Record<string, unknown>).glyphindTone === 'string' ? String((element.customData as Record<string, unknown>).glyphindTone) : ['blue', 'lilac', 'green', 'orange'][index % 4],
+    ...(typeof element.customData === 'object' && element.customData !== null && typeof (element.customData as Record<string, unknown>).glyphindColorHex === 'string' && (element.customData as Record<string, unknown>).glyphindColorHex ? { colorHex: String((element.customData as Record<string, unknown>).glyphindColorHex) } : {}),
+    shape: typeof element.customData === 'object' && element.customData !== null && ['card', 'circle', 'pill', 'diamond', 'hexagon'].includes(String((element.customData as Record<string, unknown>).glyphindShape)) ? String((element.customData as Record<string, unknown>).glyphindShape) as DiagramNode['shape'] : element.type === 'ellipse' ? 'circle' : element.type === 'diamond' ? 'diamond' : 'card',
     inference: 'user',
   }));
   const nodeIds = new Map(visibleShapes.map((element, index) => [element.id, nodes[index].id]));
@@ -254,7 +287,12 @@ export function importExcalidraw(source: string, name = 'Dibujo Excalidraw'): Pr
     const to = element.endBinding?.elementId ? nodeIds.get(element.endBinding.elementId) : undefined;
     if (!from || !to || from === to) return [];
     const label = labelsByArrow.get(element.id);
-    return [{ id: `excalidraw-edge-${index + 1}`, from, to, direction: element.type === 'arrow' ? 'forward' as const : 'none' as const, ...(label ? { label, relation: label } : {}) }];
+    const direction = element.startArrowhead && element.endArrowhead ? 'both' : element.startArrowhead ? 'backward' : element.endArrowhead ? 'forward' : 'none';
+    const customData = typeof element.customData === 'object' && element.customData !== null ? element.customData as Record<string, unknown> : {};
+    const ports = ['auto', 'top', 'right', 'bottom', 'left'];
+    const fromPort = ports.includes(String(customData.glyphindFromPort)) ? customData.glyphindFromPort as EdgePort : undefined;
+    const toPort = ports.includes(String(customData.glyphindToPort)) ? customData.glyphindToPort as EdgePort : undefined;
+    return [{ id: `excalidraw-edge-${index + 1}`, from, to, direction, ...(fromPort ? { fromPort } : {}), ...(toPort ? { toPort } : {}), ...(label ? { label, relation: label } : {}) }];
   });
   const id = `project-excalidraw-${Date.now()}`;
   return { schemaVersion: 1, id, name: name.replace(/\.excalidraw$/i, ''), type: 'flow', updated: Date.now(), nodes, edges, groups: [], pages: [{ id: 'page-main', title: 'Página principal', nodeIds: nodes.map((node) => node.id), edgeIds: edges.map((edge) => edge.id) }], sources: [] };
@@ -274,7 +312,7 @@ export function exportExcalidraw(project: Project): string {
     const x = Math.round(node.x * scaleX);
     const y = Math.round(node.y * scaleY);
     const shape = node.shape === 'circle' ? 'ellipse' : node.shape === 'diamond' ? 'diamond' : 'rectangle';
-    elements.push({ id, type: shape, x, y, width: 180, height: 76, angle: 0, strokeColor: '#343330', backgroundColor: '#ffffff', fillStyle: 'solid', strokeWidth: 1, strokeStyle: 'solid', roughness: 0, opacity: 100, groupIds: [], frameId: null, roundness: { type: 3 }, seed: index + 1, version: 1, versionNonce: index + 1, isDeleted: false, boundElements: [{ id: textId, type: 'text' }], link: null, locked: false });
+    elements.push({ id, type: shape, x, y, width: 180, height: 76, angle: 0, customData: { glyphind: true, glyphindDetail: node.detail, glyphindTone: node.tone, glyphindColorHex: node.colorHex ?? '', glyphindShape: node.shape ?? 'card' }, strokeColor: /^#[\da-f]{3}(?:[\da-f]{3})?$/i.test(node.colorHex ?? '') ? node.colorHex! : '#343330', backgroundColor: '#ffffff', fillStyle: 'solid', strokeWidth: 1, strokeStyle: 'solid', roughness: 0, opacity: 100, groupIds: [], frameId: null, roundness: { type: 3 }, seed: index + 1, version: 1, versionNonce: index + 1, isDeleted: false, boundElements: [{ id: textId, type: 'text' }], link: null, locked: false });
     elements.push({ id: textId, type: 'text', x, y: y + 20, width: 180, height: 36, angle: 0, strokeColor: '#343330', backgroundColor: 'transparent', fillStyle: 'solid', strokeWidth: 1, strokeStyle: 'solid', roughness: 0, opacity: 100, groupIds: [], frameId: null, seed: index + 501, version: 1, versionNonce: index + 501, isDeleted: false, boundElements: [], link: null, locked: false, fontSize: 18, fontFamily: 1, text: node.label, textAlign: 'center', verticalAlign: 'middle', containerId: id, originalText: node.label, autoResize: false, lineHeight: 1.25 });
   });
   project.edges.forEach((edge, index) => {
@@ -288,7 +326,7 @@ export function exportExcalidraw(project: Project): string {
     const y1 = Math.round(from.y * scaleY + 38);
     const x2 = Math.round(to.x * scaleX + 90);
     const y2 = Math.round(to.y * scaleY + 38);
-    elements.push({ id, type: edge.direction === 'none' ? 'line' : 'arrow', x: x1, y: y1, width: x2 - x1, height: y2 - y1, angle: 0, strokeColor: /^#[\da-f]{3}(?:[\da-f]{3})?$/i.test(edge.style?.color ?? '') ? edge.style!.color! : '#6b6962', backgroundColor: 'transparent', fillStyle: 'solid', strokeWidth: 2, strokeStyle: edge.style?.dashed === false ? 'solid' : 'dashed', roughness: 0, opacity: 100, groupIds: [], frameId: null, roundness: null, seed: index + 1001, version: 1, versionNonce: index + 1001, isDeleted: false, boundElements: [], link: null, locked: false, points: [[0, 0], [x2 - x1, y2 - y1]], startBinding: { elementId: start, focus: 0, gap: 1 }, endBinding: { elementId: end, focus: 0, gap: 1 }, startArrowhead: null, endArrowhead: edge.direction === 'none' ? null : 'triangle' });
+    elements.push({ id, type: edge.direction === 'none' ? 'line' : 'arrow', x: x1, y: y1, width: x2 - x1, height: y2 - y1, angle: 0, customData: { glyphind: true, glyphindDirection: edge.direction, glyphindFromPort: edge.fromPort ?? 'auto', glyphindToPort: edge.toPort ?? 'auto', glyphindColor: edge.style?.color ?? '', glyphindDashed: edge.style?.dashed ?? true }, strokeColor: /^#[\da-f]{3}(?:[\da-f]{3})?$/i.test(edge.style?.color ?? '') ? edge.style!.color! : '#6b6962', backgroundColor: 'transparent', fillStyle: 'solid', strokeWidth: 2, strokeStyle: edge.style?.dashed === false ? 'solid' : 'dashed', roughness: 0, opacity: 100, groupIds: [], frameId: null, roundness: null, seed: index + 1001, version: 1, versionNonce: index + 1001, isDeleted: false, boundElements: [], link: null, locked: false, points: [[0, 0], [x2 - x1, y2 - y1]], startBinding: { elementId: start, focus: 0, gap: 1 }, endBinding: { elementId: end, focus: 0, gap: 1 }, startArrowhead: edge.direction === 'backward' || edge.direction === 'both' ? 'triangle' : null, endArrowhead: edge.direction === 'forward' || edge.direction === 'both' ? 'triangle' : null });
     const label = edge.label || edge.relation;
     if (label) elements.push({ id: `t_${safeId(edge.id)}_${index}`, type: 'text', x: Math.round((x1 + x2) / 2), y: Math.round((y1 + y2) / 2) - 14, width: Math.min(240, Math.max(40, label.length * 9)), height: 24, angle: 0, strokeColor: '#343330', backgroundColor: '#ffffff', fillStyle: 'solid', strokeWidth: 1, strokeStyle: 'solid', roughness: 0, opacity: 100, groupIds: [], frameId: null, seed: index + 1501, version: 1, versionNonce: index + 1501, isDeleted: false, boundElements: [], link: null, locked: false, fontSize: 16, fontFamily: 1, text: label, textAlign: 'center', verticalAlign: 'middle', containerId: id, originalText: label, autoResize: true, lineHeight: 1.25 });
   });

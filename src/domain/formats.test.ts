@@ -21,12 +21,18 @@ test('exporta IDs estables y labels con escape seguro', () => {
   });
   const exported = exportMermaid(project);
   assert.match(exported, /^flowchart LR/m);
-  assert.match(exported, /a_one\["A 'idea'/);
+  assert.match(exported, /a_one\["A \\\"idea\\\"/);
   assert.doesNotMatch(exported, /<script/i);
   assert.match(exported, /\| conecta \|/);
   const roundTrip = importMermaid(exported);
   assert.equal(roundTrip.nodes.length, 2);
   assert.equal(roundTrip.edges.length, 1);
+});
+
+test('Mermaid conserva direcciones backward, both y none', () => {
+  const project = normalizeProject({ id: 'directions', name: 'Direcciones', type: 'flow', nodes: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }, { id: 'c', label: 'C' }, { id: 'd', label: 'D' }], edges: [{ id: 'back', from: 'a', to: 'b', direction: 'backward' }, { id: 'both', from: 'b', to: 'c', direction: 'both' }, { id: 'none', from: 'c', to: 'd', direction: 'none' }] });
+  const exported = exportMermaid(project);
+  assert.deepEqual(importMermaid(exported).edges.map((edge) => edge.direction), ['backward', 'both', 'none']);
 });
 
 test('rechaza directivas ejecutables o sintaxis desconocida en vez de ignorarlas', () => {
@@ -41,6 +47,13 @@ test('convierte Markdown a un documento editable conservando el original y su pr
   assert.equal(project.data?.document, markdown);
   assert.equal(project.nodes.length, 4);
   assert.equal(project.sources[0].kind, 'file');
+});
+
+test('Markdown ignora fenced code, conserva headings repetidos y limita a 200 nodos', () => {
+  const project = importMarkdown('# Título\n```md\n# no importar\n- no importar\n```\n## Repetido\n## Repetido\n- visible');
+  assert.deepEqual(project.nodes.map((node) => node.label), ['Título', 'Repetido', 'Repetido', 'visible']);
+  assert.throws(() => importMarkdown('```\n# solo código\n```'), /no contiene.*importables/i);
+  assert.equal(importMarkdown(Array.from({ length: 205 }, (_, i) => `- elemento ${i}`).join('\n')).nodes.length, 200);
 });
 
 test('exporta e importa Excalidraw manteniendo nodos, texto y conectores editables', () => {
@@ -60,6 +73,17 @@ test('exporta e importa Excalidraw manteniendo nodos, texto y conectores editabl
   assert.equal(restored.edges[0].label, 'continuar');
 });
 
+test('Excalidraw conserva ambos sentidos y metadatos personalizados de Glyphind', () => {
+  const project = normalizeProject({ id: 'meta', name: 'Meta', type: 'flow', nodes: [{ id: 'a', label: 'A', detail: 'detalle', shape: 'hexagon', tone: 'orange', colorHex: '#abc' }, { id: 'b', label: 'B' }], edges: [{ id: 'e', from: 'a', to: 'b', direction: 'both', fromPort: 'bottom', toPort: 'left' }] });
+  const restored = importExcalidraw(exportExcalidraw(project));
+  assert.equal(restored.edges[0].direction, 'both');
+  assert.equal(restored.edges[0].fromPort, 'bottom');
+  assert.equal(restored.edges[0].toPort, 'left');
+  assert.equal(restored.nodes[0].detail, 'detalle');
+  assert.equal(restored.nodes[0].shape, 'hexagon');
+  assert.equal(restored.nodes[0].colorHex, '#abc');
+});
+
 test('rechaza archivos Excalidraw con esquema desconocido', () => {
   assert.throws(() => importExcalidraw('{"type":"other","elements":[]}'), /Excalidraw válido/i);
 });
@@ -69,7 +93,7 @@ test('registra descriptores locales de plugins sin ejecutar extensiones inválid
   const storage = { getItem: () => saved, setItem: (_key: string, value: string) => { saved = value; } };
   const plugins: FormatPlugin[] = [{ id: 'markdown-extra', name: 'Markdown alterno', extensions: ['mdx'], kind: 'importer', enabled: true }];
   writeFormatPlugins(plugins, storage);
-  assert.deepEqual(readFormatPlugins(storage), plugins);
+  assert.deepEqual(readFormatPlugins(storage), [{ ...plugins[0], enabled: false }]);
   saved = '[{"id":"bad","name":"Bad","extensions":["x;alert(1)"],"kind":"importer","enabled":true}]';
   assert.deepEqual(readFormatPlugins(storage), []);
 });
