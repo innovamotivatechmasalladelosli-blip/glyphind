@@ -61,7 +61,7 @@
 - [x] Extracción HTML usa DOMParser en documento inerte, descarta elementos activos/embebidos y limita la fuente a 2 MB; importación de archivos limita a 10 MB.
 - [x] El workflow `.github/workflows/ci.yml` automatiza typecheck, suite de pruebas y build en pushes y pull requests.
 - [x] `npm run typecheck` y `npm test` pasan; la suite cubre formatos, diffs, adaptadores, seguridad SVG y plantillas locales.
-- [ ] Ejecutar y confirmar el workflow en GitHub Actions después de publicar; el token usado anteriormente no tenía permiso `workflows`, por lo que puede requerirse actualizar permisos para el push.
+- [x] CI remoto verificado después del push a `main`: GitHub Actions run `42775239889` terminó con `success`; GitHub Pages sirve el JavaScript y CSS del build publicado.
 - [ ] Añadir layouts especializados y editores semánticos completos para matrices, ciclos y conjuntos; los editores de tablero y cronograma existentes aún necesitan mejoras de estructura y dependencias.
 - [ ] Virtualizar canvas grandes y validar carga/rendimiento con proyectos de referencia.
 - [ ] Implementar captura móvil desde la acción Compartir del sistema operativo.
