@@ -1,4 +1,5 @@
 import { migrateProjects, type Project } from '../domain/model';
+import { recoverableSnapshots } from './recovery';
 
 const DB_NAME = 'glyphind-local-first';
 const DB_VERSION = 1;
@@ -35,20 +36,40 @@ function readLocalFallback(): Project[] {
   }
 }
 
-export async function loadWorkspace(): Promise<Project[]> {
+export async function loadWorkspace(): Promise<{ projects: Project[]; recoveredFromSnapshot: boolean }> {
   const fallback = readLocalFallback();
+  let db: IDBDatabase | undefined;
+  let workspace: StoredWorkspace | undefined;
+  let snapshots: StoredSnapshot[] = [];
   try {
-    const db = await openDb();
-    const workspace = await new Promise<StoredWorkspace | undefined>((resolve, reject) => {
-      const request = db.transaction('workspace', 'readonly').objectStore('workspace').get(ACTIVE_KEY);
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => resolve(request.result as StoredWorkspace | undefined);
+    const openedDb = await openDb();
+    db = openedDb;
+    const result = await new Promise<{ workspace?: StoredWorkspace; snapshots: StoredSnapshot[] }>((resolve, reject) => {
+      const transaction = openedDb.transaction(['workspace', 'snapshots'], 'readonly');
+      const workspaceRequest = transaction.objectStore('workspace').get(ACTIVE_KEY);
+      const snapshotsRequest = transaction.objectStore('snapshots').getAll();
+      let workspaceResult: StoredWorkspace | undefined;
+      let snapshotsResult: StoredSnapshot[] = [];
+      workspaceRequest.onsuccess = () => { workspaceResult = workspaceRequest.result as StoredWorkspace | undefined; };
+      snapshotsRequest.onsuccess = () => { snapshotsResult = snapshotsRequest.result as StoredSnapshot[]; };
+      transaction.onerror = () => reject(transaction.error ?? new Error('No se pudo leer el workspace'));
+      transaction.oncomplete = () => resolve({ workspace: workspaceResult, snapshots: snapshotsResult });
     });
-    db.close();
-    return workspace?.projects ? migrateProjects(workspace.projects) : fallback;
+    workspace = result.workspace;
+    snapshots = result.snapshots;
   } catch {
-    return fallback;
+    // Se intenta fallback local incluso cuando el activo de IndexedDB falla.
+  } finally {
+    db?.close();
   }
+
+  if (Array.isArray(workspace?.projects)) {
+    try { return { projects: migrateProjects(workspace.projects), recoveredFromSnapshot: false }; } catch { /* busca un snapshot consistente */ }
+  }
+  for (const snapshot of recoverableSnapshots<Project>(snapshots)) {
+    try { return { projects: migrateProjects(snapshot.projects), recoveredFromSnapshot: true }; } catch { /* sigue con el siguiente snapshot */ }
+  }
+  return { projects: fallback, recoveredFromSnapshot: false };
 }
 
 export async function persistWorkspace(projects: Project[]): Promise<'indexeddb' | 'localStorage'> {

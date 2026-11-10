@@ -1,4 +1,5 @@
 import type { GlyphindSource } from '../domain/model';
+import { selectSemanticSentences, splitSummarySentences } from '../domain/semantic-summary';
 
 export type LocalAnalysisMode = 'rules' | 'model';
 export type AnalysisEvidence = Pick<GlyphindSource, 'kind' | 'title' | 'url' | 'fragment' | 'selector' | 'generatedBy' | 'confidence'> & { text: string };
@@ -15,7 +16,8 @@ export type LocalAnalysisResult = {
 };
 
 type AnalyzeRequest = { id: number; action: 'analyze'; raw: string; sourceUrl?: string; mode: LocalAnalysisMode };
-type AnalyzeResponse = { id: number; ok: true; result: LocalAnalysisResult } | { id: number; ok: false; error: string };
+export type LocalAnalysisProgress = { stage: 'starting' | 'fetching' | 'downloading' | 'loading' | 'generating'; file?: string; progress?: number };
+type AnalyzeResponse = { id: number; ok: true; result: LocalAnalysisResult } | { id: number; ok: false; error: string } | { id: number; ok: true; progress: LocalAnalysisProgress };
 
 const stopWords = new Set('para con las los una uno que del por sus más como este esta desde entre sobre donde cuando cómo qué son esto esta esta también pero porque desde hasta sobre entre hacia cada puede pueden sido muy sin contra'.split(' '));
 const stripMarkup = (value: string) => value
@@ -77,22 +79,49 @@ function buildResult(raw: string, sourceUrl?: string): LocalAnalysisResult {
   };
 }
 
-type TextGenerator = (prompt: string, options?: Record<string, unknown>) => Promise<unknown>;
-let generator: TextGenerator | null = null;
-const MODEL_ID = 'Xenova/flan-t5-small';
+type EmbeddingTensor = { data: ArrayLike<number>; dims: number[] };
+type EmbeddingGenerator = (inputs: string[], options?: Record<string, unknown>) => Promise<EmbeddingTensor>;
+let generator: EmbeddingGenerator | null = null;
+const MODEL_ID = 'Xenova/multilingual-e5-small';
 
-async function modelSummary(text: string) {
+function reportProgress(id: number, progress: LocalAnalysisProgress) {
+  self.postMessage({ id, ok: true, progress } satisfies AnalyzeResponse);
+}
+
+async function selectWithLocalModel(text: string, requestId: number) {
   if (!generator) {
+    reportProgress(requestId, { stage: 'downloading' });
     const transformers = await import('@huggingface/transformers');
     transformers.env.useBrowserCache = true;
     transformers.env.allowLocalModels = false;
-    generator = await transformers.pipeline('text2text-generation', MODEL_ID, { dtype: 'q8' }) as unknown as TextGenerator;
+    generator = await transformers.pipeline('feature-extraction', MODEL_ID, {
+      dtype: 'q8',
+      progress_callback: (event: { status?: string; file?: string; progress?: number }) => {
+        const stage = event.status === 'progress' || event.status === 'download' ? 'downloading' : 'loading';
+        reportProgress(requestId, { stage, ...(event.file ? { file: event.file.split('/').pop() } : {}), ...(typeof event.progress === 'number' ? { progress: event.progress } : {}) });
+      },
+    }) as unknown as EmbeddingGenerator;
   }
   const currentGenerator = generator;
   if (!currentGenerator) throw new Error('El generador local no está disponible.');
-  const output = await currentGenerator(`Resume en español en dos frases, conserva los conceptos clave: ${text.slice(0, 1800)}`, { max_new_tokens: 96, temperature: 0.2 });
-  const first = Array.isArray(output) ? output[0] as { generated_text?: string } : output as { generated_text?: string };
-  return first.generated_text?.trim() || '';
+  const sentences = splitSummarySentences(text);
+  if (!sentences.length) throw new Error('No hay frases suficientemente largas para clasificar semánticamente.');
+  reportProgress(requestId, { stage: 'generating' });
+  const inputs = [`query: ${text.slice(0, 1800)}`, ...sentences.map((sentence) => `passage: ${sentence}`)];
+  const output = await currentGenerator(inputs, { pooling: 'mean', normalize: true });
+  const [rows, width] = output.dims;
+  if (rows !== inputs.length || !width || output.data.length < rows * width) throw new Error('El modelo local devolvió embeddings incompletos.');
+  const vectors = Array.from({ length: rows }, (_, row) => Array.from({ length: width }, (_, column) => Number(output.data[row * width + column])));
+  const query = vectors[0];
+  const scores = vectors.slice(1).map((vector) => {
+    const dot = vector.reduce((sum, value, index) => sum + value * query[index], 0);
+    const normA = Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0));
+    const normB = Math.sqrt(query.reduce((sum, value) => sum + value * value, 0));
+    return normA && normB ? dot / (normA * normB) : Number.NaN;
+  });
+  const selected = selectSemanticSentences(sentences, scores, 2);
+  if (!selected.length) throw new Error('No se pudo puntuar ninguna frase de la fuente. Se conserva la extracción local.');
+  return selected.join(' ');
 }
 
 self.onmessage = async (event: MessageEvent<AnalyzeRequest>) => {
@@ -102,11 +131,12 @@ self.onmessage = async (event: MessageEvent<AnalyzeRequest>) => {
     const result = buildResult(request.raw, request.sourceUrl);
     if (request.mode === 'model') {
       try {
-        const generated = await modelSummary(`${result.title}. ${result.summary}`);
-        if (generated) result.summary = generated;
+        const sourceText = `${result.title}. ${result.paragraphs.slice(0, 4).join(' ') || result.summary}`;
+        result.summary = await selectWithLocalModel(sourceText, request.id);
         result.modelUsed = true;
         result.modelId = MODEL_ID;
       } catch (error) {
+        result.modelUsed = false;
         result.modelError = error instanceof Error ? error.message : 'No se pudo descargar o ejecutar el modelo compacto.';
       }
     }
