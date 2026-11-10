@@ -36,6 +36,8 @@
 - [x] La Vista de esquema permite recorrer nodos y relaciones sin depender de la posición o el color y puede abrir el inspector del elemento seleccionado.
 - [x] Los paneles de evidencia y esquema se convierten en bottom sheets en pantallas pequeñas.
 - [x] Se respeta `prefers-reduced-motion` para eliminar movimientos no esenciales.
+- [x] Se ajustó la barra de herramientas del canvas para permanecer flotante y utilizable en escritorio y móvil; en anchos menores el canvas ofrece desplazamiento horizontal y una indicación visible para encontrar el resto del diagrama.
+- [x] Las acciones rápidas del dashboard se apilan en móvil; se comprobó que la página no desborda horizontalmente a 320, 390, 768 y 1440 px.
 
 ## Verificación de entrega
 
@@ -44,10 +46,20 @@
 - [x] `npm run build` genera la SPA, el Worker de análisis, los artefactos WASM de Transformers.js, el manifiesto y el Service Worker.
 - [x] El repositorio canónico de GitHub se utilizó como fuente de trabajo y conserva el flujo de build estático.
 
-## Próximas fases aún abiertas
+## Estado real de las integraciones y trabajo aún pendiente
 
-- [ ] Añadir importadores/exportadores Mermaid y Excalidraw con validación de seguridad.
-- [ ] Implementar layouts semánticos especializados para matriz, ciclo, conjuntos, cronograma y tablero sin duplicar el documento canónico.
-- [ ] Incorporar historial visible con diff y undo/redo por operaciones semánticas.
-- [ ] Evaluar colaboración opcional Yjs/WebRTC sólo con permisos explícitos y sin cambiar el modo individual local-first.
-- [ ] Añadir pruebas de accesibilidad automatizadas, recuperación tras cierre abrupto y rendimiento p95 en dispositivos móviles de referencia.
+- [x] Importación/exportación básica de Mermaid y Excalidraw, con pruebas de round-trip para nodos y conectores; no todos los metadatos o construcciones específicas de cada formato se preservan.
+- [x] Importación de Markdown y arrastrar/soltar archivos admitidos desde el dashboard.
+- [x] Biblioteca local inicial de plantillas: guardar un proyecto como plantilla y aplicarlo desde el editor.
+- [x] Editor manual inicial de conectores con nodo de origen/destino, etiqueta y dirección. Los «puertos» aún equivalen a elegir nodos; no hay anclajes de conexión nombrados por lado.
+- [x] Build de producción, pruebas y typecheck corren localmente; las diez pruebas actuales pasan.
+- [ ] Completar undo/redo semántico para todas las vistas y controles, y mostrar diffs antes/después reales; el historial actual es un resumen de operaciones del canvas, no un comparador visual completo.
+- [ ] Completar la API y ejecución segura de plugins para parsers/exportadores; hoy sólo se registran descriptores locales, sin ejecutar ni despachar extensiones.
+- [ ] Añadir layouts especializados y editores semánticos completos para matrices, ciclos, conjuntos, cronogramas y tableros; el layout existente no cubre todas esas estructuras.
+- [ ] Virtualizar canvas grandes y validar carga/rendimiento con proyectos de referencia.
+- [ ] Implementar captura móvil desde la acción Compartir del sistema operativo.
+- [ ] Completar sanitización de HTML y SVG de extremo a extremo, agregar pruebas de seguridad y revisar los límites de importación/exportación.
+- [ ] Crear CI automático en GitHub Actions. El primer intento de publicar el workflow fue rechazado por falta del permiso `workflows` del token de GitHub.
+- [ ] Hacer pruebas prácticas con TalkBack y VoiceOver; las etiquetas ARIA existentes no sustituyen esas verificaciones.
+- [ ] Evaluar colaboración opt-in con Yjs/WebRTC sólo después de definir conflictos, permisos y datos que salen del dispositivo.
+- [ ] Validar recuperación tras cierre abrupto y rendimiento p95 en móviles reales.
