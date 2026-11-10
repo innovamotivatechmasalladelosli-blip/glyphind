@@ -38,6 +38,8 @@
 - [x] Se respeta `prefers-reduced-motion` para eliminar movimientos no esenciales.
 - [x] Se ajustó la barra de herramientas del canvas para permanecer flotante y utilizable en escritorio y móvil; en anchos menores el canvas ofrece desplazamiento horizontal y una indicación visible para encontrar el resto del diagrama.
 - [x] Las acciones rápidas del dashboard se apilan en móvil; dashboard, editor y menú de exportación se comprobaron sin overflow a 320, 390, 768 y 1440 px.
+- [x] El menú de opciones de proyecto se posiciona dentro del viewport, se recoloca al desplazarse y ofrece Editar, Duplicar y Eliminar también en la última fila, en escritorio y móvil.
+- [x] El pie del sidebar muestra “Powered by InnovA+” justo encima de la versión de Glyphind.
 
 ## Verificación de entrega
 

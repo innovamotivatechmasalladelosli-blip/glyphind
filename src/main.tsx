@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
+import { StrictMode, useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 import { analyzeLocally, localAiModes } from './ai/localAi';
 import { createEdgesFromNodes, createWorkspaceEnvelope, migrateProjects, type DiagramNode, type EdgeDirection, type EdgePort, type GlyphindEdge, type GlyphindSource, type GlyphindOperationChange, type NodeShape, type Project, type ProjectData, type Slide, type BoardCard, type BoardColumn, type TimelineItem } from './domain/model';
@@ -439,8 +439,50 @@ function App() {
   const [showPluginManager, setShowPluginManager] = useState(false);
   const [templateName, setTemplateName] = useState('');
   const [openMenu, setOpenMenu] = useState<string | null>(null);
+  const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
+  const menuButtonRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
   const [toast, setToast] = useState('');
   const importInputRef = useRef<HTMLInputElement>(null);
+  const toggleProjectMenu = (projectId: string, event: ReactMouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    if (openMenu === projectId) {
+      setOpenMenu(null);
+      setMenuPosition(null);
+      menuButtonRef.current = null;
+      return;
+    }
+    menuButtonRef.current = event.currentTarget;
+    setMenuPosition(null);
+    setOpenMenu(projectId);
+  };
+  const positionProjectMenu = () => {
+    const button = menuButtonRef.current;
+    const menu = menuRef.current;
+    if (!openMenu || !button || !menu) return;
+    const anchor = button.getBoundingClientRect();
+    const bounds = menu.getBoundingClientRect();
+    const margin = 12;
+    const gap = 8;
+    const hasRoomBelow = window.innerHeight - anchor.bottom >= bounds.height + gap + margin;
+    const top = hasRoomBelow
+      ? Math.min(window.innerHeight - bounds.height - margin, anchor.bottom + gap)
+      : Math.max(margin, anchor.top - bounds.height - gap);
+    const left = Math.max(margin, Math.min(window.innerWidth - bounds.width - margin, anchor.right - bounds.width));
+    setMenuPosition({ top, left });
+  };
+  useLayoutEffect(() => {
+    positionProjectMenu();
+  }, [openMenu]);
+  useEffect(() => {
+    if (!openMenu) return;
+    window.addEventListener('scroll', positionProjectMenu, true);
+    window.addEventListener('resize', positionProjectMenu);
+    return () => {
+      window.removeEventListener('scroll', positionProjectMenu, true);
+      window.removeEventListener('resize', positionProjectMenu);
+    };
+  }, [openMenu]);
 
   useEffect(() => {
     let mounted = true;
@@ -673,7 +715,7 @@ function App() {
           <div className="workspace-actions"><button className="sidebar-action" onClick={() => downloadWorkspace(projects)}><Icon name="arrow" size={14} /> Exportar respaldo</button><button className="sidebar-action" onClick={() => importInputRef.current?.click()}><Icon name="folder" size={14} /> Importar archivo</button><button className="sidebar-action" onClick={() => setShowTemplateManager((open) => !open)}>Plantillas locales ({localTemplates.length})</button><button className="sidebar-action" onClick={() => setShowPluginManager((open) => !open)}>Catálogo de formatos ({formatPlugins.length})</button><input ref={importInputRef} type="file" accept="application/vnd.glyphind+json,application/json,.json,.glyphind,.mmd,.mermaid,.md,.markdown,.excalidraw" hidden onChange={importWorkspace} /></div>
           {showTemplateManager && <section className="local-manager" aria-label="Biblioteca de plantillas"><h3>Biblioteca local</h3><label className="field-label">Nombre de esta plantilla<input value={templateName} onChange={(event) => setTemplateName(event.target.value)} placeholder="Ej. Flujo de aprobación" /></label><button className="sidebar-action" onClick={() => saveCurrentTemplate()}>Guardar proyecto actual como plantilla</button>{localTemplates.map((template) => <div className="local-manager-row" key={template.id}><span>{template.name} · {typeFor(template.type).label}</span><button className="sidebar-action" onClick={() => applyDashboardTemplate(template)}>Aplicar</button><button className="sidebar-action" onClick={() => removeLocalTemplate(template.id)}>Eliminar</button></div>)}</section>}
           {showPluginManager && <section className="local-manager" aria-label="Plugins de formato"><h3>Extensiones registradas</h3><p>Este catálogo guarda metadatos locales únicamente. Los descriptores importados no habilitan funciones de importación/exportación ni ejecutan código; los formatos disponibles siguen siendo los integrados en Glyphind.</p>{formatPlugins.length ? formatPlugins.map((plugin) => <div className="local-manager-row" key={plugin.id}><span>{plugin.name} · .{plugin.extensions.join(', .')} · {plugin.kind}</span><span className="plugin-status">Metadatos · sin ejecución</span><button className="sidebar-action" onClick={() => { const next = formatPlugins.filter((item) => item.id !== plugin.id); writeFormatPlugins(next); setFormatPlugins(next); }}>Eliminar</button></div>) : <p>No hay plugins instalados.</p>}<button className="sidebar-action" onClick={() => importInputRef.current?.click()}>Importar descriptor JSON</button></section>}
-          <div className="sidebar-footnote"><span>G</span><span>Glyphind <em>0.1</em></span></div>
+          <div className="powered-by">Powered by <strong>InnovA+</strong></div><div className="sidebar-footnote"><span>G</span><span>Glyphind <em>0.1</em></span></div>
         </div>
       </aside>
       {mobileMenu && <button className="sidebar-overlay" aria-label="Cerrar menú" onClick={() => setMobileMenu(false)} />}
@@ -723,7 +765,7 @@ function App() {
                       </button>
                       <span className="project-status"><span className="status-dot" /> {storageMode === 'indexeddb' ? 'Local · IndexedDB' : storageMode === 'cargando' ? 'Local · preparando' : 'Local · respaldo'}</span>
                       <span className="project-updated">{formatDate(project.updated)}</span>
-                      <div className="project-actions"><button className="row-open" onClick={() => openProject(project)}>Abrir <Icon name="arrow" size={15} /></button><button className="icon-button more-button" aria-label={`Más opciones para ${project.name}`} onClick={(event) => { event.stopPropagation(); setOpenMenu(openMenu === project.id ? null : project.id); }}><Icon name="more" /></button>{openMenu === project.id && <div className="context-menu" onClick={(event) => event.stopPropagation()}><button onClick={() => openEditModal(project)}><Icon name="edit" size={15} /> Editar detalles</button><button onClick={() => duplicateProject(project)}><Icon name="copy" size={15} /> Duplicar proyecto</button><div className="menu-line" /><button className="danger" onClick={() => removeProject(project)}><Icon name="trash" size={15} /> Eliminar</button></div>}</div>
+                      <div className="project-actions"><button className="row-open" onClick={() => openProject(project)}>Abrir <Icon name="arrow" size={15} /></button><button className="icon-button more-button" aria-label={`Más opciones para ${project.name}`} aria-haspopup="menu" aria-expanded={openMenu === project.id} onClick={(event) => toggleProjectMenu(project.id, event)}><Icon name="more" /></button>{openMenu === project.id && <div ref={menuRef} className="context-menu" role="menu" style={{ top: menuPosition?.top ?? -1000, left: menuPosition?.left ?? 12, visibility: menuPosition ? 'visible' : 'hidden' }} onClick={(event) => event.stopPropagation()}><button onClick={() => openEditModal(project)}><Icon name="edit" size={15} /> Editar detalles</button><button onClick={() => duplicateProject(project)}><Icon name="copy" size={15} /> Duplicar proyecto</button><div className="menu-line" /><button className="danger" onClick={() => removeProject(project)}><Icon name="trash" size={15} /> Eliminar</button></div>}</div>
                     </article>
                   );
                 })}
