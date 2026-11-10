@@ -1,7 +1,8 @@
 import { StrictMode, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 import { analyzeLocally, localAiModes } from './ai/localAi';
-import { createEdgesFromNodes, createWorkspaceEnvelope, migrateProjects, type DiagramNode, type GlyphindEdge, type GlyphindSource, type NodeShape, type Project, type ProjectData, type Slide, type BoardCard, type BoardColumn, type TimelineItem } from './domain/model';
+import { createEdgesFromNodes, createWorkspaceEnvelope, migrateProjects, type DiagramNode, type EdgeDirection, type GlyphindEdge, type GlyphindSource, type NodeShape, type Project, type ProjectData, type Slide, type BoardCard, type BoardColumn, type TimelineItem } from './domain/model';
+import { exportExcalidraw, exportMermaid, importExcalidraw, importMarkdown, importMermaid, readFormatPlugins, writeFormatPlugins, type FormatPlugin } from './domain/formats';
 import { loadWorkspace, persistWorkspace } from './storage/workspace';
 import type { LocalAnalysisMode, LocalAnalysisResult } from './workers/analysis.worker';
 import { AnalysisReview, OutlinePanel } from './components/local-panels';
@@ -11,7 +12,7 @@ type IconName =
   | 'menu' | 'plus' | 'grid' | 'folder' | 'flow' | 'checklist' | 'team' | 'community'
   | 'archive' | 'search' | 'filter' | 'more' | 'edit' | 'copy' | 'trash' | 'arrow'
   | 'close' | 'back' | 'save' | 'share' | 'add' | 'command' | 'chevron' | 'spark';
-type ExportFormat = 'markdown' | 'json' | 'glyphind' | 'csv' | 'svg';
+type ExportFormat = 'markdown' | 'json' | 'glyphind' | 'csv' | 'svg' | 'mermaid' | 'excalidraw';
 
 type DiagramType = {
   id: string;
@@ -345,6 +346,14 @@ function safeFilename(name: string) {
   return name.toLowerCase().replace(/[^a-z0-9áéíóúñ]+/gi, '-').replace(/^-|-$/g, '') || 'glyphind-proyecto';
 }
 
+function escapeXml(value: string) {
+  return value.replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[character]!);
+}
+
+function safeSvgColor(value: string | undefined, fallback: string) {
+  return value && /^#[\da-f]{3}(?:[\da-f]{3})?$/i.test(value) ? value : fallback;
+}
+
 function downloadProject(project: Project, format: ExportFormat = 'markdown') {
   const type = typeFor(project.type);
   const baseName = safeFilename(project.name);
@@ -363,9 +372,17 @@ function downloadProject(project: Project, format: ExportFormat = 'markdown') {
     return;
   }
   if (format === 'svg') {
-    const nodes = project.nodes.map((node, index) => `<g transform="translate(${node.x * 8},${node.y * 5})"><rect x="-65" y="-25" width="130" height="50" rx="${shapeForNode(project.type, node, index) === 'circle' ? 25 : 8}" fill="#fffefa" stroke="${type.color}"/><text x="0" y="0" text-anchor="middle" dominant-baseline="middle" font-family="Arial" font-size="11" fill="#24231f">${node.label.replace(/[<&>]/g, '')}</text></g>`).join('');
-    const links = connectorEdges(project).map(({ from, to, edge }) => `<path d="${connectorPath(from, to).replace(/(\d+(?:\.\d+)?)/g, (value) => String(Number(value) * (value === String(from.x) || value === String(to.x) ? 8 : 5)))}" fill="none" stroke="${edge.style?.color ?? '#c9c6bd'}" ${edge.style?.dashed === false ? '' : 'stroke-dasharray="4 4"'}/>`).join('');
+    const nodes = project.nodes.map((node, index) => `<g transform="translate(${node.x * 8},${node.y * 5})"><rect x="-65" y="-25" width="130" height="50" rx="${shapeForNode(project.type, node, index) === 'circle' ? 25 : 8}" fill="#fffefa" stroke="${type.color}"/><text x="0" y="0" text-anchor="middle" dominant-baseline="middle" font-family="Arial" font-size="11" fill="#24231f">${escapeXml(node.label)}</text></g>`).join('');
+    const links = connectorEdges(project).map(({ from, to, edge }) => `<path d="${connectorPath(from, to).replace(/(\d+(?:\.\d+)?)/g, (value) => String(Number(value) * (value === String(from.x) || value === String(to.x) ? 8 : 5)))}" fill="none" stroke="${safeSvgColor(edge.style?.color, '#c9c6bd')}" ${edge.style?.dashed === false ? '' : 'stroke-dasharray="4 4"'}/>`).join('');
     downloadFile(`<svg xmlns="http://www.w3.org/2000/svg" width="800" height="500" viewBox="0 0 800 500"><rect width="100%" height="100%" fill="#fdfcf8"/>${links}${nodes}</svg>`, `${baseName}.svg`, 'image/svg+xml;charset=utf-8');
+    return;
+  }
+  if (format === 'mermaid') {
+    downloadFile(exportMermaid(project), `${baseName}.mmd`, 'text/plain;charset=utf-8');
+    return;
+  }
+  if (format === 'excalidraw') {
+    downloadFile(exportExcalidraw(project), `${baseName}.excalidraw`, 'application/json;charset=utf-8');
     return;
   }
   const specialized = project.data?.document ?? (project.data?.slides ? project.data.slides.map((slide, index) => `## ${index + 1}. ${slide.title}\n\n${slide.body}`).join('\n\n') : project.data?.timeline ? project.data.timeline.map((item) => `## ${item.date} · ${item.title}\n\n${item.detail}`).join('\n\n') : project.data?.board ? project.data.board.map((column) => `## ${column.title}\n\n${column.cards.map((card) => `- **${card.title}** — ${card.detail}`).join('\n')}`).join('\n\n') : null);
@@ -413,6 +430,11 @@ function App() {
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [draftName, setDraftName] = useState('');
   const [draftType, setDraftType] = useState('flow');
+  const [localTemplates, setLocalTemplates] = useState<Array<{ id: string; name: string; type: string; nodes: DiagramNode[]; edges: GlyphindEdge[] }>>(() => { try { return JSON.parse(localStorage.getItem('glyphind-local-templates-v1') || '[]'); } catch { return []; } });
+  const [formatPlugins, setFormatPlugins] = useState<FormatPlugin[]>(() => readFormatPlugins());
+  const [showTemplateManager, setShowTemplateManager] = useState(false);
+  const [showPluginManager, setShowPluginManager] = useState(false);
+  const [templateName, setTemplateName] = useState('');
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [toast, setToast] = useState('');
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -463,7 +485,19 @@ function App() {
   };
 
   const updateProject = (id: string, patch: Partial<Project>) => {
-    setProjects((current) => current.map((project) => project.id === id ? { ...project, ...patch, updated: Date.now() } : project));
+    setProjects((current) => current.map((project) => {
+      if (project.id !== id) return project;
+      const next = { ...project, ...patch, updated: Date.now() };
+      const summary = describeProjectChange(project, next);
+      if (summary === 'Cambio del proyecto') return next;
+      const operations = project.history ?? [];
+      const last = operations[operations.length - 1];
+      const now = Date.now();
+      const history = last && last.summary === summary && now - Date.parse(last.at) < 800
+        ? [...operations.slice(0, -1), { ...last, at: new Date(now).toISOString() }]
+        : [...operations, { id: `op-${now}`, at: new Date(now).toISOString(), type: 'edit', summary }].slice(-100);
+      return { ...next, history };
+    }));
   };
 
   const submitProject = (event: FormEvent) => {
@@ -530,14 +564,45 @@ function App() {
     setToast('Proyecto eliminado del dispositivo');
   };
 
-  const importWorkspace = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = '';
+  const importFile = (file: File) => {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
       try {
-        const parsed = JSON.parse(String(reader.result));
+        const raw = String(reader.result);
+        const extension = file.name.split('.').pop()?.toLowerCase();
+        if (extension === 'mmd' || extension === 'mermaid') {
+          const project = importMermaid(raw, file.name.replace(/\.(mmd|mermaid)$/i, ''));
+          setProjects((current) => [project, ...current]);
+          setFilter('all');
+          setSearch('');
+          setToast(`Mermaid importado: ${project.nodes.length} nodos y ${project.edges.length} conectores`);
+          return;
+        }
+        if (extension === 'md' || extension === 'markdown') {
+          const project = importMarkdown(raw, file.name);
+          setProjects((current) => [project, ...current]);
+          setFilter('all');
+          setSearch('');
+          setToast(`Markdown importado: ${project.nodes.length} elementos reconocidos`);
+          return;
+        }
+        if (extension === 'excalidraw') {
+          const project = importExcalidraw(raw, file.name);
+          setProjects((current) => [project, ...current]);
+          setFilter('all');
+          setSearch('');
+          setToast(`Excalidraw importado: ${project.nodes.length} elementos y ${project.edges.length} conectores`);
+          return;
+        }
+        const parsed = JSON.parse(raw);
+        if (parsed?.format === 'glyphind-plugin' && Array.isArray(parsed.plugins)) {
+          const merged = [...formatPlugins, ...parsed.plugins.map((plugin: FormatPlugin) => ({ ...plugin, enabled: Boolean(plugin.enabled) }))];
+          writeFormatPlugins(merged);
+          setFormatPlugins(readFormatPlugins());
+          setToast(`${parsed.plugins.length} plugin(s) de formato agregados como descriptores locales`);
+          return;
+        }
         const imported = parsed?.document ? [parsed.document] : (Array.isArray(parsed) ? parsed : parsed?.projects ?? (parsed?.nodes && parsed?.name ? [parsed] : undefined));
         const normalized = migrateProjects(imported);
         if (!normalized.length) throw new Error('Formato inválido');
@@ -550,6 +615,11 @@ function App() {
       }
     };
     reader.readAsText(file);
+  };
+  const importWorkspace = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (file) importFile(file);
   };
 
   if (activeView === 'editor' && activeProject) {
@@ -565,7 +635,7 @@ function App() {
   }
 
   return (
-    <div className="app-shell">
+    <div className="app-shell" onDragOver={(event) => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); }} onDrop={(event) => { const file = event.dataTransfer.files[0]; if (file) { event.preventDefault(); importFile(file); } }}>
       <aside className={`sidebar ${mobileMenu ? 'is-open' : ''}`}>
         <div className="sidebar-top">
           <div className="brand"><BrandMark /><span>Glyphind</span></div>
@@ -580,7 +650,9 @@ function App() {
           </div>
         </nav>
         <div className="sidebar-bottom">
-          <div className="workspace-actions"><button className="sidebar-action" onClick={() => downloadWorkspace(projects)}><Icon name="arrow" size={14} /> Exportar respaldo</button><button className="sidebar-action" onClick={() => importInputRef.current?.click()}><Icon name="folder" size={14} /> Importar respaldo</button><input ref={importInputRef} type="file" accept="application/vnd.glyphind+json,application/json,.json,.glyphind" hidden onChange={importWorkspace} /></div>
+          <div className="workspace-actions"><button className="sidebar-action" onClick={() => downloadWorkspace(projects)}><Icon name="arrow" size={14} /> Exportar respaldo</button><button className="sidebar-action" onClick={() => importInputRef.current?.click()}><Icon name="folder" size={14} /> Importar archivo</button><button className="sidebar-action" onClick={() => setShowTemplateManager((open) => !open)}>Plantillas locales ({localTemplates.length})</button><button className="sidebar-action" onClick={() => setShowPluginManager((open) => !open)}>Plugins de formato ({formatPlugins.length})</button><input ref={importInputRef} type="file" accept="application/vnd.glyphind+json,application/json,.json,.glyphind,.mmd,.mermaid,.md,.markdown,.excalidraw" hidden onChange={importWorkspace} /></div>
+          {showTemplateManager && <section className="local-manager" aria-label="Biblioteca de plantillas"><h3>Biblioteca local</h3><label className="field-label">Nombre de esta plantilla<input value={templateName} onChange={(event) => setTemplateName(event.target.value)} placeholder="Ej. Flujo de aprobación" /></label><button className="sidebar-action" onClick={() => { if (!activeProject) { setToast('Abre un lienzo para guardar una plantilla'); return; } const entry = { id: `template-${Date.now()}`, name: templateName.trim() || activeProject.name, type: activeProject.type, nodes: activeProject.nodes, edges: activeProject.edges }; const next = [...localTemplates, entry]; setLocalTemplates(next); localStorage.setItem('glyphind-local-templates-v1', JSON.stringify(next)); setTemplateName(''); setToast('Plantilla guardada solo en este dispositivo'); }}>Guardar proyecto actual como plantilla</button>{localTemplates.map((template) => <div className="local-manager-row" key={template.id}><span>{template.name} · {typeFor(template.type).label}</span><button className="sidebar-action" onClick={() => { if (!activeProject) { setToast('Abre el lienzo donde aplicar la plantilla'); return; } const nodes = template.nodes.map((node) => ({ ...node, id: `${node.id}-${Date.now()}` })); const idMap = new Map(template.nodes.map((node, index) => [node.id, nodes[index].id])); const edges = template.edges.map((edge) => ({ ...edge, id: `${edge.id}-${Date.now()}`, from: idMap.get(edge.from) ?? edge.from, to: idMap.get(edge.to) ?? edge.to })); updateProject(activeProject.id, { nodes, edges, type: template.type }); setToast('Plantilla local aplicada'); }}>Aplicar</button><button className="sidebar-action" onClick={() => { const next = localTemplates.filter((item) => item.id !== template.id); setLocalTemplates(next); localStorage.setItem('glyphind-local-templates-v1', JSON.stringify(next)); }}>Eliminar</button></div>)}</section>}
+          {showPluginManager && <section className="local-manager" aria-label="Plugins de formato"><h3>Extensiones registradas</h3><p>Estos descriptores son locales y nunca ejecutan scripts importados. Importa un archivo JSON de tipo glyphind-plugin para registrar un parser o exportador.</p>{formatPlugins.length ? formatPlugins.map((plugin) => <div className="local-manager-row" key={plugin.id}><span>{plugin.name} · .{plugin.extensions.join(', .')} · {plugin.kind}</span><button className="sidebar-action" onClick={() => { const next = formatPlugins.map((item) => item.id === plugin.id ? { ...item, enabled: !item.enabled } : item); writeFormatPlugins(next); setFormatPlugins(next); }}>{plugin.enabled ? 'Desactivar' : 'Activar'}</button><button className="sidebar-action" onClick={() => { const next = formatPlugins.filter((item) => item.id !== plugin.id); writeFormatPlugins(next); setFormatPlugins(next); }}>Eliminar</button></div>) : <p>No hay plugins instalados.</p>}<button className="sidebar-action" onClick={() => importInputRef.current?.click()}>Importar descriptor JSON</button></section>}
           <div className="sidebar-footnote"><span>G</span><span>Glyphind <em>0.1</em></span></div>
         </div>
       </aside>
@@ -667,7 +739,7 @@ function ProjectModal({ mode, name, type, setName, setType, onSubmit, onClose }:
 
 function ExportMenu({ project, onExport }: { project: Project; onExport: (format: ExportFormat) => void }) {
   const [open, setOpen] = useState(false);
-  const options: Array<[ExportFormat, string]> = [['glyphind', 'Archivo .glyphind'], ['markdown', 'Markdown'], ['json', 'JSON editable'], ['csv', 'CSV de elementos'], ['svg', 'SVG vectorial']];
+  const options: Array<[ExportFormat, string]> = [['glyphind', 'Archivo .glyphind'], ['markdown', 'Markdown'], ['mermaid', 'Mermaid (.mmd)'], ['excalidraw', 'Excalidraw (.excalidraw)'], ['json', 'JSON editable'], ['csv', 'CSV de elementos'], ['svg', 'SVG vectorial']];
   return <div className="export-menu"><button className="secondary-button" onClick={() => setOpen((value) => !value)} aria-expanded={open}><Icon name="arrow" size={14} /> Descargar <Icon name="chevron" size={14} /></button>{open && <div className="export-options">{options.map(([format, label]) => <button key={format} onClick={() => { onExport(format); setOpen(false); }}>{label}</button>)}</div>}</div>;
 }
 
@@ -758,6 +830,19 @@ function TimelineEditor({ project, onBack, onChange, onToast }: { project: Proje
   return <WorkspaceFrame project={project} onBack={onBack} onExport={(format) => { downloadProject(project, format); onToast('Cronograma descargado'); }}><div className="specialized-heading"><div><span className="section-kicker">Cronograma</span><h1>{project.name}</h1><p>Planifica fases, fechas, dependencias y entregables.</p></div><button className="secondary-button" onClick={add}><Icon name="plus" size={15} /> Añadir fase</button></div><div className="timeline-workspace">{items.map((item, index) => <article className="timeline-item" key={item.id}><span className="timeline-index">{index + 1}</span><div><input className="timeline-date" value={item.date} onChange={(event) => update(item.id, { date: event.target.value })} /><input className="timeline-title" value={item.title} onChange={(event) => update(item.id, { title: event.target.value })} /><textarea value={item.detail} onChange={(event) => update(item.id, { detail: event.target.value })} rows={2} /><div className="timeline-actions"><button onClick={() => move(index, -1)} disabled={index === 0} title="Subir fase"><Icon name="back" size={14} /> Subir</button><button onClick={() => move(index, 1)} disabled={index === items.length - 1} title="Bajar fase"><Icon name="arrow" size={14} /> Bajar</button><button onClick={() => duplicate(item)} title="Duplicar fase"><Icon name="copy" size={14} /> Duplicar</button><button className="delete-slide" onClick={() => remove(item.id)} disabled={items.length <= 1}><Icon name="trash" size={14} /> Eliminar</button></div></div></article>)}</div></WorkspaceFrame>;
 }
 
+function describeProjectChange(before: Project, after: Project) {
+  const changed: string[] = [];
+  if (before.name !== after.name) changed.push('nombre');
+  if (before.type !== after.type) changed.push('tipo de diagrama');
+  if (JSON.stringify(before.nodes) !== JSON.stringify(after.nodes)) changed.push('nodos');
+  if (JSON.stringify(before.edges) !== JSON.stringify(after.edges)) changed.push('conectores');
+  if (JSON.stringify(before.groups) !== JSON.stringify(after.groups)) changed.push('grupos');
+  if (JSON.stringify(before.pages) !== JSON.stringify(after.pages)) changed.push('páginas');
+  if (JSON.stringify(before.sources) !== JSON.stringify(after.sources)) changed.push('fuentes');
+  if (JSON.stringify(before.data) !== JSON.stringify(after.data)) changed.push('contenido');
+  return changed.length ? `Cambio en ${changed.join(', ')}` : 'Cambio del proyecto';
+}
+
 function Editor({ project, allProjects, onBack, onChange, onToast }: { project: Project; allProjects: Project[]; onBack: () => void; onChange: (project: Project) => void; onToast: (message: string) => void }) {
   const [selectedNodeId, setSelectedNodeId] = useState('');
   const [inspectorOpen, setInspectorOpen] = useState(false);
@@ -768,25 +853,99 @@ function Editor({ project, allProjects, onBack, onChange, onToast }: { project: 
   const [aiMode, setAiMode] = useState<LocalAnalysisMode>('rules');
   const [analysis, setAnalysis] = useState<LocalAnalysisResult | null>(null);
   const [analysisError, setAnalysisError] = useState('');
+  const [edgeTargetId, setEdgeTargetId] = useState('');
+  const [edgeLabel, setEdgeLabel] = useState('');
+  const [edgeDirection, setEdgeDirection] = useState<EdgeDirection>('forward');
+  const [savedTemplates, setSavedTemplates] = useState<Array<{ id: string; name: string; type: string; nodes: DiagramNode[]; edges: GlyphindEdge[] }>>(() => { try { return JSON.parse(localStorage.getItem('glyphind-local-templates-v1') || '[]'); } catch { return []; } });
+  const [, refreshHistory] = useState(0);
+  const historyRef = useRef<{ projectId: string; past: Project[]; future: Project[]; present: Project; lastAt: number }>({ projectId: project.id, past: [], future: [], present: structuredClone(project), lastAt: 0 });
+  if (historyRef.current.projectId !== project.id) historyRef.current = { projectId: project.id, past: [], future: [], present: structuredClone(project), lastAt: 0 };
+  else if (historyRef.current.present.updated !== project.updated && project.updated > historyRef.current.present.updated) historyRef.current.present = structuredClone(project);
+  const changeProject = (next: Project) => {
+    const history = historyRef.current;
+    const previous = history.present;
+    if (JSON.stringify({ ...previous, updated: 0 }) !== JSON.stringify({ ...next, updated: 0 })) {
+      const now = Date.now();
+      if (now - history.lastAt > 700 || !history.past.length) history.past.push(structuredClone(previous));
+      if (history.past.length > 80) history.past.shift();
+      history.future = [];
+      history.present = structuredClone(next);
+      history.lastAt = now;
+      refreshHistory((value) => value + 1);
+    }
+    onChange(next);
+  };
+  const undo = () => {
+    const history = historyRef.current;
+    const previous = history.past.pop();
+    if (!previous) return;
+    history.future.push(structuredClone(history.present));
+    history.present = structuredClone(previous);
+    history.lastAt = 0;
+    changeProject(previous);
+    onToast('Cambio deshecho');
+  };
+  const redo = () => {
+    const history = historyRef.current;
+    const next = history.future.pop();
+    if (!next) return;
+    history.past.push(structuredClone(history.present));
+    history.present = structuredClone(next);
+    history.lastAt = 0;
+    changeProject(next);
+    onToast('Cambio rehecho');
+  };
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.matches('input, textarea, select, [contenteditable="true"]')) return;
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'z') return;
+      event.preventDefault();
+      if (event.shiftKey) redo(); else undo();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  });
   const draggingNodeRef = useRef<string | null>(null);
   const type = typeFor(project.type);
   const selectedNode = project.nodes.find((node) => node.id === selectedNodeId);
 
-  if (project.type === 'document') return <DocumentEditor project={project} onBack={onBack} onChange={onChange} onToast={onToast} />;
-  if (project.type === 'presentation') return <PresentationEditor project={project} allProjects={allProjects} onBack={onBack} onChange={onChange} onToast={onToast} />;
-  if (project.type === 'board') return <BoardEditor project={project} onBack={onBack} onChange={onChange} onToast={onToast} />;
-  if (project.type === 'timeline') return <TimelineEditor project={project} onBack={onBack} onChange={onChange} onToast={onToast} />;
+  if (project.type === 'document') return <DocumentEditor project={project} onBack={onBack} onChange={changeProject} onToast={onToast} />;
+  if (project.type === 'presentation') return <PresentationEditor project={project} allProjects={allProjects} onBack={onBack} onChange={changeProject} onToast={onToast} />;
+  if (project.type === 'board') return <BoardEditor project={project} onBack={onBack} onChange={changeProject} onToast={onToast} />;
+  if (project.type === 'timeline') return <TimelineEditor project={project} onBack={onBack} onChange={changeProject} onToast={onToast} />;
 
   const updateNode = (patch: Partial<DiagramNode>) => {
     if (!selectedNode) return;
-    onChange({ ...project, nodes: project.nodes.map((node) => node.id === selectedNode.id ? { ...node, ...patch } : node) });
+    changeProject({ ...project, nodes: project.nodes.map((node) => node.id === selectedNode.id ? { ...node, ...patch } : node) });
+  };
+
+  const createManualEdge = () => {
+    if (!selectedNode || !edgeTargetId || selectedNode.id === edgeTargetId) return;
+    if (project.edges.some((edge) => edge.from === selectedNode.id && edge.to === edgeTargetId)) {
+      onToast('Ya existe un conector entre esos puertos');
+      return;
+    }
+    const edge: GlyphindEdge = { id: `edge-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, from: selectedNode.id, to: edgeTargetId, direction: edgeDirection, ...(edgeLabel.trim() ? { label: edgeLabel.trim(), relation: edgeLabel.trim() } : {}) };
+    const edges = [...project.edges, edge];
+    changeProject({ ...project, edges, pages: project.pages.map((page) => ({ ...page, edgeIds: [...new Set([...page.edgeIds, edge.id])] })) });
+    setEdgeLabel('');
+    onToast('Conector manual creado');
+  };
+
+  const updateEdge = (edgeId: string, patch: Partial<GlyphindEdge>) => changeProject({ ...project, edges: project.edges.map((edge) => edge.id === edgeId ? { ...edge, ...patch } : edge) });
+
+  const removeEdge = (edgeId: string) => {
+    const edges = project.edges.filter((edge) => edge.id !== edgeId);
+    changeProject({ ...project, edges, pages: project.pages.map((page) => ({ ...page, edgeIds: page.edgeIds.filter((id) => id !== edgeId) })) });
+    onToast('Conector eliminado');
   };
 
   const addNode = () => {
     const node: DiagramNode = { id: `node-${Date.now()}`, label: 'Nuevo elemento', detail: 'Añade una descripción', x: 38, y: 68, tone: 'orange' };
     const previous = project.nodes[project.nodes.length - 1];
     const nextEdges = previous ? [...project.edges, { id: `edge-${previous.id}-${node.id}`, from: previous.id, to: node.id, direction: 'forward' as const, relation: 'siguiente', confidence: 1 }] : project.edges;
-    onChange({ ...project, nodes: [...project.nodes, node], edges: nextEdges, pages: project.pages.map((page) => ({ ...page, nodeIds: [...page.nodeIds, node.id], edgeIds: nextEdges.map((edge) => edge.id) })) });
+    changeProject({ ...project, nodes: [...project.nodes, node], edges: nextEdges, pages: project.pages.map((page) => ({ ...page, nodeIds: [...page.nodeIds, node.id], edgeIds: nextEdges.map((edge) => edge.id) })) });
     setSelectedNodeId(node.id);
     onToast('Elemento añadido al lienzo');
   };
@@ -794,7 +953,7 @@ function Editor({ project, allProjects, onBack, onChange, onToast }: { project: 
   const duplicateNode = () => {
     if (!selectedNode) return;
     const node: DiagramNode = { ...selectedNode, id: `node-${Date.now()}`, label: `${selectedNode.label} · copia`, x: Math.min(88, selectedNode.x + 8), y: Math.min(84, selectedNode.y + 8) };
-    onChange({ ...project, nodes: [...project.nodes, node], pages: project.pages.map((page) => ({ ...page, nodeIds: [...page.nodeIds, node.id] })) });
+    changeProject({ ...project, nodes: [...project.nodes, node], pages: project.pages.map((page) => ({ ...page, nodeIds: [...page.nodeIds, node.id] })) });
     setSelectedNodeId(node.id);
     onToast('Elemento duplicado');
   };
@@ -803,7 +962,7 @@ function Editor({ project, allProjects, onBack, onChange, onToast }: { project: 
     if (!selectedNode || project.nodes.length <= 1) return;
     const remaining = project.nodes.filter((node) => node.id !== selectedNode.id);
     const nextEdges = project.edges.filter((edge) => edge.from !== selectedNode.id && edge.to !== selectedNode.id);
-    onChange({ ...project, nodes: remaining, edges: nextEdges, pages: project.pages.map((page) => ({ ...page, nodeIds: page.nodeIds.filter((id) => id !== selectedNode.id), edgeIds: page.edgeIds.filter((id) => nextEdges.some((edge) => edge.id === id)) })) });
+    changeProject({ ...project, nodes: remaining, edges: nextEdges, pages: project.pages.map((page) => ({ ...page, nodeIds: page.nodeIds.filter((id) => id !== selectedNode.id), edgeIds: page.edgeIds.filter((id) => nextEdges.some((edge) => edge.id === id)) })) });
     setSelectedNodeId(remaining[0].id);
     onToast('Elemento eliminado');
   };
@@ -822,7 +981,7 @@ function Editor({ project, allProjects, onBack, onChange, onToast }: { project: 
         const angle = -Math.PI / 2 + ((index - 1) / branches) * Math.PI * 2;
         return { ...node, x: 50 + Math.cos(angle) * 34, y: 50 + Math.sin(angle) * 32 };
       });
-      onChange({ ...project, nodes: nextNodes });
+      changeProject({ ...project, nodes: nextNodes });
       setZoom(100);
       onToast('Mapa organizado alrededor de su nodo central');
       return;
@@ -834,7 +993,7 @@ function Editor({ project, allProjects, onBack, onChange, onToast }: { project: 
       x: 12 + (index % columns) * (76 / Math.max(1, columns - 1)),
       y: 18 + Math.floor(index / columns) * (64 / Math.max(1, rows - 1)),
     }));
-    onChange({ ...project, nodes: nextNodes });
+    changeProject({ ...project, nodes: nextNodes });
     setZoom(100);
     onToast('Lienzo ajustado al flujo');
   };
@@ -852,7 +1011,7 @@ function Editor({ project, allProjects, onBack, onChange, onToast }: { project: 
     const rect = event.currentTarget.getBoundingClientRect();
     const x = Math.max(5, Math.min(95, ((event.clientX - rect.left) / rect.width) * 100));
     const y = Math.max(5, Math.min(95, ((event.clientY - rect.top) / rect.height) * 100));
-    onChange({ ...project, nodes: project.nodes.map((node) => node.id === id ? { ...node, x, y } : node) });
+    changeProject({ ...project, nodes: project.nodes.map((node) => node.id === id ? { ...node, x, y } : node) });
   };
 
   const stopMovingNode = () => { draggingNodeRef.current = null; };
@@ -862,7 +1021,7 @@ function Editor({ project, allProjects, onBack, onChange, onToast }: { project: 
     if (nextType === project.type) return;
     const nextNodes = (defaultNodes[nextType] ?? defaultNodes.flow).map((node) => ({ ...node, id: `${node.id}-${Date.now()}` }));
     const nextEdges = createEdgesFromNodes(nextType, nextNodes);
-    onChange({ ...project, type: nextType, nodes: nextNodes, edges: nextEdges, pages: [{ id: 'page-main', title: 'Página principal', nodeIds: nextNodes.map((node) => node.id), edgeIds: nextEdges.map((edge) => edge.id) }], sources: [] });
+    changeProject({ ...project, type: nextType, nodes: nextNodes, edges: nextEdges, pages: [{ id: 'page-main', title: 'Página principal', nodeIds: nextNodes.map((node) => node.id), edgeIds: nextEdges.map((edge) => edge.id) }], sources: [] });
     setSelectedNodeId(nextNodes[0]?.id ?? '');
     onToast(`Formato cambiado a ${typeFor(nextType).label}`);
   };
@@ -870,9 +1029,26 @@ function Editor({ project, allProjects, onBack, onChange, onToast }: { project: 
   const applyTemplate = () => {
     const nextNodes = (defaultNodes[project.type] ?? defaultNodes.flow).map((node) => ({ ...node, id: `${node.id}-${Date.now()}` }));
     const nextEdges = createEdgesFromNodes(project.type, nextNodes);
-    onChange({ ...project, nodes: nextNodes, edges: nextEdges, pages: [{ id: 'page-main', title: 'Página principal', nodeIds: nextNodes.map((node) => node.id), edgeIds: nextEdges.map((edge) => edge.id) }], sources: [] });
+    changeProject({ ...project, nodes: nextNodes, edges: nextEdges, pages: [{ id: 'page-main', title: 'Página principal', nodeIds: nextNodes.map((node) => node.id), edgeIds: nextEdges.map((edge) => edge.id) }], sources: [] });
     setSelectedNodeId(nextNodes[0]?.id ?? '');
     onToast('Plantilla aplicada al lienzo');
+  };
+
+  const saveLocalTemplate = () => {
+    const entry = { id: `template-${Date.now()}`, name: project.name, type: project.type, nodes: project.nodes, edges: project.edges };
+    const next = [...savedTemplates, entry];
+    setSavedTemplates(next);
+    localStorage.setItem('glyphind-local-templates-v1', JSON.stringify(next));
+    onToast('Plantilla guardada solo en este dispositivo');
+  };
+
+  const applyLocalTemplate = (template: typeof savedTemplates[number]) => {
+    const nodes = template.nodes.map((node) => ({ ...node, id: `${node.id}-${Date.now()}` }));
+    const idMap = new Map(template.nodes.map((node, index) => [node.id, nodes[index].id]));
+    const edges = template.edges.map((edge) => ({ ...edge, id: `${edge.id}-${Date.now()}`, from: idMap.get(edge.from) ?? edge.from, to: idMap.get(edge.to) ?? edge.to }));
+    changeProject({ ...project, type: template.type, nodes, edges, pages: [{ id: `page-${Date.now()}`, title: 'Página principal', nodeIds: nodes.map((node) => node.id), edgeIds: edges.map((edge) => edge.id) }], sources: [] });
+    setSelectedNodeId(nodes[0]?.id ?? '');
+    onToast(`Plantilla «${template.name}» aplicada`);
   };
 
   const analyzeNodeInformation = async () => {
@@ -935,7 +1111,7 @@ function Editor({ project, allProjects, onBack, onChange, onToast }: { project: 
     const generatedEdges: GlyphindEdge[] = generated.map((node, index) => ({ id: `edge-${selectedNode.id}-${node.id}`, from: selectedNode.id, to: node.id, relation: analysis.modelUsed ? 'sugerido por modelo local' : 'sugerido por reglas', direction: 'forward', confidence: sourceRecords[index]?.confidence ?? 0.8 }));
     const nextEdges = [...project.edges.filter((edge) => !generatedEdges.some((item) => item.id === edge.id)), ...generatedEdges];
     const nextNodes = [{ ...base, x: project.type === 'mindmap' ? 50 : base.x, y: project.type === 'mindmap' ? 50 : base.y }, ...project.nodes.filter((node) => node.id !== selectedNode.id), ...generated];
-    onChange({ ...project, nodes: nextNodes, edges: nextEdges, sources: [...project.sources, ...sourceRecords], pages: project.pages.map((page) => ({ ...page, nodeIds: nextNodes.map((node) => node.id), edgeIds: nextEdges.map((edge) => edge.id) })) });
+    changeProject({ ...project, nodes: nextNodes, edges: nextEdges, sources: [...project.sources, ...sourceRecords], pages: project.pages.map((page) => ({ ...page, nodeIds: nextNodes.map((node) => node.id), edgeIds: nextEdges.map((edge) => edge.id) })) });
     setSelectedNodeId(selectedNode.id);
     setAnalysis(null);
     setAnalysisError('');
@@ -945,7 +1121,7 @@ function Editor({ project, allProjects, onBack, onChange, onToast }: { project: 
   return (
     <div className="editor-shell canvas-editor-shell">
       <header className="editor-topbar"><button className="back-link" onClick={onBack}><Icon name="back" size={17} /> Proyectos</button><div className="editor-breadcrumb"><span>/</span><span>{project.name}</span><span className="editor-type-pill" style={{ color: type.color, backgroundColor: type.soft }}><Icon name={type.icon} size={13} /> {type.label}</span></div><div className="editor-actions"><span className="saved-label"><span className="canvas-live-dot" /> Guardado local</span><ExportMenu project={project} onExport={(format) => { downloadProject(project, format); onToast('Diagrama descargado'); }} /></div></header>
-      <main className="editor-main canvas-editor-main"><div className="editor-heading"><div><span className="section-kicker">Lienzo de composición</span><h1>{project.name}</h1><p>Resume, conecta y transforma información en un organizador visual.</p></div><div className="canvas-format-tools"><label>Formato<select value={project.type} onChange={(event) => changeCanvasFormat(event.target.value)}>{canvasOrganizerTypes.map((item) => <option value={item.id} key={item.id}>{item.label}</option>)}</select></label><button className="secondary-button" onClick={applyTemplate}><Icon name="spark" size={15} /> Plantilla</button></div></div><div className={`editor-workspace canvas-full-workspace ${inspectorOpen ? '' : 'inspector-is-closed'}`}><section className="canvas-section"><div className="canvas-header"><span><span className="canvas-live-dot" /> Lienzo de trabajo</span><span className="canvas-help">Arrastra y conecta tus ideas</span>{!inspectorOpen && <button className="reopen-inspector" onClick={() => setInspectorOpen(true)}>Abrir propiedades <Icon name="arrow" size={13} /></button>}<button className="outline-toggle" onClick={() => setOutlineOpen((open) => !open)} aria-expanded={outlineOpen}><Icon name="command" size={13} /> {outlineOpen ? 'Ocultar esquema' : 'Vista de esquema'}</button></div><div className={`diagram-canvas ${gridVisible ? '' : 'grid-is-hidden'}`} onClick={() => setSelectedNodeId('')} onPointerMove={moveNode} onPointerUp={stopMovingNode} onPointerCancel={stopMovingNode}><div className="canvas-zoom-layer" style={{ transform: `scale(${zoom / 100})` }}><svg className="canvas-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">{connectorEdges(project).map(({ edge, from, to }) => <path key={edge.id} d={connectorPath(from, to)} />)}</svg>{project.nodes.map((node, index) => <button key={node.id} className={`diagram-node node-${node.tone} shape-${shapeForNode(project.type, node, index)} ${selectedNode?.id === node.id ? 'is-selected' : ''}`} style={{ left: `${node.x}%`, top: `${node.y}%`, borderLeftColor: colorForNode(node) }} onPointerDown={(event) => { event.stopPropagation(); setSelectedNodeId(node.id); draggingNodeRef.current = node.id; event.currentTarget.setPointerCapture(event.pointerId); }} aria-label={`${node.label}. ${node.detail}`} onClick={(event) => { event.stopPropagation(); setSelectedNodeId(node.id); }}><span className="node-grip"><i /><i /><i /></span><strong>{node.label}</strong><small>{node.detail}</small></button>)}</div></div><div className="canvas-footer"><span>{project.nodes.length} elementos · {zoom}%</span><span>Arrastra para mover · selecciona para editar</span></div></section>{inspectorOpen && <aside className="properties-panel"><div className="properties-head"><div><span className="section-kicker">Propiedades</span><h2>Editar selección</h2></div><button className="icon-button" aria-label="Cerrar propiedades" onClick={() => setInspectorOpen(false)}><Icon name="close" size={16} /></button></div>{selectedNode ? <div className="properties-content"><div className="selected-preview" style={{ backgroundColor: type.soft, color: type.color }}><Icon name={type.icon} size={21} /><span>{type.label}</span></div><label className="field-label">Título<input value={selectedNode.label} onChange={(event) => updateNode({ label: event.target.value })} /></label><label className="field-label">Descripción<textarea value={selectedNode.detail} onChange={(event) => updateNode({ detail: event.target.value })} rows={4} /></label><details className="advanced-source-tools"><summary>Fuentes y resumen avanzado</summary><label className="field-label">Fuente web (URL)<input type="url" value={selectedNode.sourceUrl ?? ''} onChange={(event) => updateNode({ sourceUrl: event.target.value })} placeholder="https://sitio.com/articulo" /></label><label className="field-label">Contenido fuente<textarea value={selectedNode.content ?? ''} onChange={(event) => updateNode({ content: event.target.value })} rows={4} placeholder="Pega aquí texto o HTML para resumirlo." /></label><button className="extract-button" onClick={analyzeNodeInformation} disabled={extracting}><Icon name="spark" size={15} /> {extracting ? 'Analizando en Worker…' : `Analizar con ${localAiModes[aiMode].label}`}</button></details><label className="field-label">Forma<select value={shapeForNode(project.type, selectedNode, project.nodes.findIndex((node) => node.id === selectedNode.id))} onChange={(event) => updateNode({ shape: event.target.value as NodeShape })}><option value="card">Tarjeta</option><option value="circle">Círculo</option><option value="pill">Píldora</option><option value="diamond">Decisión</option><option value="hexagon">Hexágono</option></select></label><div className="color-picker-field"><span className="field-label">Color</span><ColorWheel value={colorForNode(selectedNode)} onChange={(color) => updateNode({ colorHex: color })} /><div className="color-swatches">{Object.entries(toneColors).map(([tone, color]) => <button type="button" key={tone} className="color-swatch" style={{ backgroundColor: color }} aria-label={`Usar color ${tone}`} onClick={() => updateNode({ tone, colorHex: color })} />)}</div></div><div className="property-actions"><button className="delete-element" onClick={duplicateNode}><Icon name="copy" size={15} /> Duplicar</button><button className="delete-element" onClick={deleteNode} disabled={project.nodes.length <= 1}><Icon name="trash" size={15} /> Eliminar</button></div></div> : <div className="properties-empty"><span><Icon name="command" size={23} /></span><p>Selecciona un elemento para editarlo.</p></div>}<button className="add-element-button" onClick={addNode}><Icon name="plus" size={15} /> Añadir elemento</button></aside>}{outlineOpen && <OutlinePanel project={project} selectedNodeId={selectedNodeId} onSelect={(id) => { setSelectedNodeId(id); setInspectorOpen(true); }} onClose={() => setOutlineOpen(false)} />}</div><aside className="canvas-tools"><div className="tool-group"><span className="tool-label">Editar</span><button className="tool-button is-active" title="Seleccionar elemento"><Icon name="command" /><span>Seleccionar</span></button><button className="tool-button" title="Añadir elemento" onClick={addNode}><Icon name="add" /><span>Añadir</span></button><button className="tool-button" title="Duplicar elemento" onClick={duplicateNode} disabled={!selectedNode}><Icon name="copy" /><span>Duplicar</span></button><button className="tool-button" title="Eliminar elemento" onClick={deleteNode} disabled={!selectedNode || project.nodes.length <= 1}><Icon name="trash" /><span>Eliminar</span></button></div><div className="tools-line" /><div className="tool-group"><span className="tool-label">Organizar</span><button className="tool-button" title="Ordenar automáticamente" onClick={fitCanvas}><Icon name="flow" /><span>Ordenar</span></button><button className="tool-button shape-tool shape-card-tool" title="Aplicar forma cuadro" onClick={() => setSelectedShape('card')}><span>Cuadro</span></button><button className="tool-button shape-tool shape-pill-tool" title="Aplicar forma pastilla" onClick={() => setSelectedShape('pill')}><span>Pastilla</span></button></div><div className="tools-line" /><div className="tool-group tool-group-view"><span className="tool-label">Vista</span><div className="zoom-controls"><button className="tool-button" title="Alejar" onClick={() => updateZoom(-25)} disabled={zoom <= 50}>−</button><button className="zoom-value zoom-button" title="Restablecer zoom" onClick={resetZoom}>{zoom}%</button><button className="tool-button" title="Acercar" onClick={() => updateZoom(25)} disabled={zoom >= 175}>+</button></div></div></aside>{analysis && <AnalysisReview result={analysis} error={analysisError} mode={aiMode} onModeChange={setAiMode} onAccept={acceptAnalysis} onDiscard={() => { setAnalysis(null); setAnalysisError(''); }} />}</main>
+      <main className="editor-main canvas-editor-main"><div className="editor-heading"><div><span className="section-kicker">Lienzo de composición</span><h1>{project.name}</h1><p>Resume, conecta y transforma información en un organizador visual.</p></div><div className="canvas-format-tools"><label>Formato<select value={project.type} onChange={(event) => changeCanvasFormat(event.target.value)}>{canvasOrganizerTypes.map((item) => <option value={item.id} key={item.id}>{item.label}</option>)}</select></label><button className="secondary-button" onClick={applyTemplate}><Icon name="spark" size={15} /> Plantilla inicial</button><button className="secondary-button" onClick={saveLocalTemplate}>Guardar en biblioteca</button>{savedTemplates.length > 0 && <label className="template-picker">Mis plantillas<select aria-label="Aplicar plantilla guardada" defaultValue="" onChange={(event) => { const template = savedTemplates.find((item) => item.id === event.target.value); if (template) applyLocalTemplate(template); event.currentTarget.value = ""; }}><option value="">Elegir…</option>{savedTemplates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}</select></label>}</div></div><div className={`editor-workspace canvas-full-workspace ${inspectorOpen ? '' : 'inspector-is-closed'}`}><section className="canvas-section"><div className="canvas-header"><span><span className="canvas-live-dot" /> Lienzo de trabajo</span><span className="canvas-help">Arrastra y conecta tus ideas</span>{!inspectorOpen && <button className="reopen-inspector" onClick={() => setInspectorOpen(true)}>Abrir propiedades <Icon name="arrow" size={13} /></button>}<button className="outline-toggle" onClick={() => setOutlineOpen((open) => !open)} aria-expanded={outlineOpen}><Icon name="command" size={13} /> {outlineOpen ? 'Ocultar esquema' : 'Vista de esquema'}</button><div className="history-controls"><button className="outline-toggle" onClick={undo} disabled={!historyRef.current.past.length} aria-label="Deshacer cambio (Ctrl o Cmd+Z)" title="Deshacer · Ctrl/Cmd+Z">↶ Deshacer</button><button className="outline-toggle" onClick={redo} disabled={!historyRef.current.future.length} aria-label="Rehacer cambio (Ctrl o Cmd+Shift+Z)" title="Rehacer · Ctrl/Cmd+Shift+Z">↷ Rehacer</button><details className="history-details"><summary>Historial ({project.history?.length ?? 0})</summary><ol>{(project.history ?? []).slice(-12).reverse().map((operation) => <li key={operation.id}><strong>{operation.summary}</strong><time dateTime={operation.at}>{new Date(operation.at).toLocaleString()}</time></li>)}</ol></details></div></div><div className={`diagram-canvas ${gridVisible ? '' : 'grid-is-hidden'}`} onClick={() => setSelectedNodeId('')} onPointerMove={moveNode} onPointerUp={stopMovingNode} onPointerCancel={stopMovingNode}><div className="canvas-zoom-layer" style={{ transform: `scale(${zoom / 100})` }}><svg className="canvas-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><defs><marker id="glyphind-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#9d9a91" /></marker></defs>{connectorEdges(project).map(({ edge, from, to }) => <g key={edge.id}><path d={connectorPath(from, to)} markerEnd={edge.direction === "forward" || edge.direction === "both" ? "url(#glyphind-arrow)" : undefined} markerStart={edge.direction === "backward" || edge.direction === "both" ? "url(#glyphind-arrow)" : undefined} />{(edge.label || edge.relation) && <text className="edge-label" x={(from.x + to.x) / 2} y={(from.y + to.y) / 2 - 2}>{edge.label || edge.relation}</text>}</g>)}</svg>{project.nodes.map((node, index) => <button key={node.id} className={`diagram-node node-${node.tone} shape-${shapeForNode(project.type, node, index)} ${selectedNode?.id === node.id ? 'is-selected' : ''}`} style={{ left: `${node.x}%`, top: `${node.y}%`, borderLeftColor: colorForNode(node) }} onPointerDown={(event) => { event.stopPropagation(); setSelectedNodeId(node.id); draggingNodeRef.current = node.id; event.currentTarget.setPointerCapture(event.pointerId); }} aria-label={`${node.label}. ${node.detail}`} onClick={(event) => { event.stopPropagation(); setSelectedNodeId(node.id); }}><span className="node-grip"><i /><i /><i /></span><strong>{node.label}</strong><small>{node.detail}</small></button>)}</div></div><div className="canvas-footer"><span>{project.nodes.length} elementos · {zoom}%</span><span>Arrastra para mover · selecciona para editar</span></div></section>{inspectorOpen && <aside className="properties-panel"><div className="properties-head"><div><span className="section-kicker">Propiedades</span><h2>Editar selección</h2></div><button className="icon-button" aria-label="Cerrar propiedades" onClick={() => setInspectorOpen(false)}><Icon name="close" size={16} /></button></div>{selectedNode ? <div className="properties-content"><div className="selected-preview" style={{ backgroundColor: type.soft, color: type.color }}><Icon name={type.icon} size={21} /><span>{type.label}</span></div><label className="field-label">Título<input value={selectedNode.label} onChange={(event) => updateNode({ label: event.target.value })} /></label><label className="field-label">Descripción<textarea value={selectedNode.detail} onChange={(event) => updateNode({ detail: event.target.value })} rows={4} /></label><details className="advanced-source-tools"><summary>Fuentes y resumen avanzado</summary><label className="field-label">Fuente web (URL)<input type="url" value={selectedNode.sourceUrl ?? ''} onChange={(event) => updateNode({ sourceUrl: event.target.value })} placeholder="https://sitio.com/articulo" /></label><label className="field-label">Contenido fuente<textarea value={selectedNode.content ?? ''} onChange={(event) => updateNode({ content: event.target.value })} rows={4} placeholder="Pega aquí texto o HTML para resumirlo." /></label><button className="extract-button" onClick={analyzeNodeInformation} disabled={extracting}><Icon name="spark" size={15} /> {extracting ? 'Analizando en Worker…' : `Analizar con ${localAiModes[aiMode].label}`}</button></details><details className="advanced-source-tools connector-editor"><summary>Conectores ({project.edges.filter((edge) => edge.from === selectedNode.id || edge.to === selectedNode.id).length})</summary><label className="field-label">Puerto de destino<select value={edgeTargetId} onChange={(event) => setEdgeTargetId(event.target.value)}><option value="">Selecciona un elemento…</option>{project.nodes.filter((node) => node.id !== selectedNode.id).map((node) => <option value={node.id} key={node.id}>{node.label}</option>)}</select></label><label className="field-label">Etiqueta del conector<input value={edgeLabel} onChange={(event) => setEdgeLabel(event.target.value)} placeholder="p. ej. depende de" /></label><label className="field-label">Dirección<select value={edgeDirection} onChange={(event) => setEdgeDirection(event.target.value as EdgeDirection)}><option value="forward">Desde el seleccionado → destino</option><option value="backward">Destino → seleccionado</option><option value="both">Ambos sentidos</option><option value="none">Sin flecha</option></select></label><button className="extract-button" onClick={createManualEdge} disabled={!edgeTargetId}><Icon name="add" size={14} /> Crear conector</button><div className="connector-list">{project.edges.filter((edge) => edge.from === selectedNode.id || edge.to === selectedNode.id).map((edge) => <div className="connector-row" key={edge.id}><strong>{project.nodes.find((node) => node.id === edge.from)?.label} → {project.nodes.find((node) => node.id === edge.to)?.label}</strong><input aria-label="Etiqueta del conector" value={edge.label ?? edge.relation ?? ""} onChange={(event) => updateEdge(edge.id, { label: event.target.value, relation: event.target.value })} placeholder="Sin etiqueta" /><select aria-label="Dirección del conector" value={edge.direction} onChange={(event) => updateEdge(edge.id, { direction: event.target.value as EdgeDirection })}><option value="forward">→</option><option value="backward">←</option><option value="both">↔</option><option value="none">—</option></select><button className="delete-element" onClick={() => removeEdge(edge.id)} aria-label="Eliminar conector"><Icon name="trash" size={13} /></button></div>)}</div></details><label className="field-label">Forma<select value={shapeForNode(project.type, selectedNode, project.nodes.findIndex((node) => node.id === selectedNode.id))} onChange={(event) => updateNode({ shape: event.target.value as NodeShape })}><option value="card">Tarjeta</option><option value="circle">Círculo</option><option value="pill">Píldora</option><option value="diamond">Decisión</option><option value="hexagon">Hexágono</option></select></label><div className="color-picker-field"><span className="field-label">Color</span><ColorWheel value={colorForNode(selectedNode)} onChange={(color) => updateNode({ colorHex: color })} /><div className="color-swatches">{Object.entries(toneColors).map(([tone, color]) => <button type="button" key={tone} className="color-swatch" style={{ backgroundColor: color }} aria-label={`Usar color ${tone}`} onClick={() => updateNode({ tone, colorHex: color })} />)}</div></div><div className="property-actions"><button className="delete-element" onClick={duplicateNode}><Icon name="copy" size={15} /> Duplicar</button><button className="delete-element" onClick={deleteNode} disabled={project.nodes.length <= 1}><Icon name="trash" size={15} /> Eliminar</button></div></div> : <div className="properties-empty"><span><Icon name="command" size={23} /></span><p>Selecciona un elemento para editarlo.</p></div>}<button className="add-element-button" onClick={addNode}><Icon name="plus" size={15} /> Añadir elemento</button></aside>}{outlineOpen && <OutlinePanel project={project} selectedNodeId={selectedNodeId} onSelect={(id) => { setSelectedNodeId(id); setInspectorOpen(true); }} onClose={() => setOutlineOpen(false)} />}</div><aside className="canvas-tools"><div className="tool-group"><span className="tool-label">Editar</span><button className="tool-button is-active" title="Seleccionar elemento"><Icon name="command" /><span>Seleccionar</span></button><button className="tool-button" title="Añadir elemento" onClick={addNode}><Icon name="add" /><span>Añadir</span></button><button className="tool-button" title="Duplicar elemento" onClick={duplicateNode} disabled={!selectedNode}><Icon name="copy" /><span>Duplicar</span></button><button className="tool-button" title="Eliminar elemento" onClick={deleteNode} disabled={!selectedNode || project.nodes.length <= 1}><Icon name="trash" /><span>Eliminar</span></button></div><div className="tools-line" /><div className="tool-group"><span className="tool-label">Organizar</span><button className="tool-button" title="Ordenar automáticamente" onClick={fitCanvas}><Icon name="flow" /><span>Ordenar</span></button><button className="tool-button shape-tool shape-card-tool" title="Aplicar forma cuadro" onClick={() => setSelectedShape('card')}><span>Cuadro</span></button><button className="tool-button shape-tool shape-pill-tool" title="Aplicar forma pastilla" onClick={() => setSelectedShape('pill')}><span>Pastilla</span></button></div><div className="tools-line" /><div className="tool-group tool-group-view"><span className="tool-label">Vista</span><div className="zoom-controls"><button className="tool-button" title="Alejar" onClick={() => updateZoom(-25)} disabled={zoom <= 50}>−</button><button className="zoom-value zoom-button" title="Restablecer zoom" onClick={resetZoom}>{zoom}%</button><button className="tool-button" title="Acercar" onClick={() => updateZoom(25)} disabled={zoom >= 175}>+</button></div></div></aside>{analysis && <AnalysisReview result={analysis} error={analysisError} mode={aiMode} onModeChange={setAiMode} onAccept={acceptAnalysis} onDiscard={() => { setAnalysis(null); setAnalysisError(''); }} />}</main>
     </div>
   );
 }
