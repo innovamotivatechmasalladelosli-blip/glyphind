@@ -14,6 +14,8 @@ Glyphind también integra un modelo gratuito y opcional mediante Transformers.js
 
 El editor incorpora una **Vista de esquema** navegable por teclado y lector de pantalla, con relaciones y procedencia legibles sin depender del color. La aplicación incluye Service Worker y manifiesto PWA progresivos para reabrir la carcasa estática sin red después de la primera visita.
 
+La segunda ampliación de herramientas hace más completos los editores especializados. Documentos permite importar `.txt` y `.md`, aplicar formato Markdown, insertar tablas y código, buscar y reemplazar, consultar un esquema navegable, abrir una vista previa, copiar el contenido y revisar métricas de lectura. Presentaciones permite vincular diapositivas con diagramas, duplicarlas y reordenarlas. Tableros permite filtrar tarjetas y administrar columnas. Todos los editores incluyen una bandeja común para copiar el JSON editable, descargar `.glyphind` y consultar atajos. El canvas permite crear conexiones manuales entre nodos, además de las relaciones iniciales de plantilla.
+
 ## Desarrollo local
 
 ```bash
