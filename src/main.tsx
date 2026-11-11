@@ -1000,18 +1000,63 @@ function ExportMenu({ project, onExport }: { project: Project; onExport: (format
   return <div className="export-menu"><button className="secondary-button" onClick={() => setOpen((value) => !value)} aria-expanded={open}><Icon name="arrow" size={14} /> Descargar <Icon name="chevron" size={14} /></button>{open && <div className="export-options">{options.map(([format, label]) => <button key={format} onClick={() => { onExport(format); setOpen(false); }}>{label}</button>)}</div>}</div>;
 }
 
+function WorkspaceTools({ project, onExport }: { project: Project; onExport: (format: ExportFormat) => void }) {
+  const [open, setOpen] = useState(false);
+  const [shortcuts, setShortcuts] = useState(false);
+  const copyJson = async () => { try { await copyText(JSON.stringify(project, null, 2)); setOpen(false); } catch { /* clipboard permissions are optional */ } };
+  return <div className="workspace-tools"><button className="secondary-button workspace-tools-trigger" onClick={() => setOpen((value) => !value)} aria-expanded={open}><Icon name="command" size={14} /> Herramientas <Icon name="chevron" size={13} /></button>{open && <div className="workspace-tools-menu"><button onClick={copyJson}><Icon name="copy" size={13} /> Copiar JSON editable</button><button onClick={() => { onExport('glyphind'); setOpen(false); }}><Icon name="save" size={13} /> Descargar .glyphind</button><button onClick={() => setShortcuts((value) => !value)}><Icon name="command" size={13} /> {shortcuts ? 'Ocultar atajos' : 'Ver atajos'}</button>{shortcuts && <div className="workspace-shortcuts"><span><kbd>Ctrl/Cmd</kbd> + <kbd>S</kbd> · guardar navegador</span><span><kbd>Ctrl/Cmd</kbd> + <kbd>F</kbd> · buscar</span><span><kbd>Esc</kbd> · cerrar menú</span></div>}</div>}</div>;
+}
 function WorkspaceFrame({ project, children, onBack, onExport }: { project: Project; children: React.ReactNode; onBack: () => void; onExport: (format: ExportFormat) => void }) {
   const type = typeFor(project.type);
-  return <div className="editor-shell"><header className="editor-topbar"><button className="back-link" onClick={onBack}><Icon name="back" size={17} /> Volver a proyectos</button><div className="editor-breadcrumb"><span>/</span><span>{project.name}</span><span className="editor-type-pill" style={{ color: type.color, backgroundColor: type.soft }}><Icon name={type.icon} size={13} /> {type.label}</span></div><div className="editor-actions"><span className="saved-label"><span className="canvas-live-dot" /> Cambios activos</span><ExportMenu project={project} onExport={onExport} /></div></header><main className="specialized-main">{children}</main></div>;
+  return <div className="editor-shell"><header className="editor-topbar"><button className="back-link" onClick={onBack}><Icon name="back" size={17} /> Volver a proyectos</button><div className="editor-breadcrumb"><span>/</span><span>{project.name}</span><span className="editor-type-pill" style={{ color: type.color, backgroundColor: type.soft }}><Icon name={type.icon} size={13} /> {type.label}</span></div><div className="editor-actions"><span className="saved-label"><span className="canvas-live-dot" /> Cambios activos</span><WorkspaceTools project={project} onExport={onExport} /><ExportMenu project={project} onExport={onExport} /></div></header><main className="specialized-main">{children}</main></div>;
 }
 
 function HistoryDock({ canUndo, canRedo, undo, redo, operations }: { canUndo: boolean; canRedo: boolean; undo: () => void; redo: () => void; operations: NonNullable<Project['history']> }) {
   return <nav className="specialized-history-dock" aria-label="Historial de edición"><button className="secondary-button" onClick={undo} disabled={!canUndo} aria-label="Deshacer cambio">↶ Deshacer</button><button className="secondary-button" onClick={redo} disabled={!canRedo} aria-label="Rehacer cambio">↷ Rehacer</button><details className="history-details"><summary>Historial ({operations.length})</summary><ol>{operations.slice(-12).reverse().map((operation) => <li key={operation.id}><strong>{operation.summary}</strong><time dateTime={operation.at}>{new Date(operation.at).toLocaleString()}</time>{Boolean(operation.changes?.length) && <HistoryDiff changes={operation.changes ?? []} />}</li>)}</ol></details></nav>;
 }
 
+async function copyText(value: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+  const helper = document.createElement('textarea');
+  helper.value = value;
+  helper.style.position = 'fixed';
+  helper.style.opacity = '0';
+  document.body.appendChild(helper);
+  helper.select();
+  document.execCommand('copy');
+  helper.remove();
+}
+function MarkdownPreview({ content }: { content: string }) {
+  const lines = content.split('\n');
+  return <div className="document-preview" aria-label="Vista previa del documento">{lines.map((line, index) => {
+    if (!line.trim()) return <div className="preview-spacer" key={index} />;
+    if (/^###\s+/.test(line)) return <h4 key={index}>{line.replace(/^###\s+/, '')}</h4>;
+    if (/^##\s+/.test(line)) return <h3 key={index}>{line.replace(/^##\s+/, '')}</h3>;
+    if (/^#\s+/.test(line)) return <h2 key={index}>{line.replace(/^#\s+/, '')}</h2>;
+    if (/^---+$/.test(line.trim())) return <hr key={index} />;
+    if (/^>\s?/.test(line)) return <blockquote key={index}>{line.replace(/^>\s?/, '')}</blockquote>;
+    if (/^\- \[[ xX]\]\s+/.test(line)) return <li key={index} className="preview-task"><input type="checkbox" checked={/^\- \[[xX]\]/.test(line)} readOnly />{line.replace(/^\- \[[ xX]\]\s+/, '')}</li>;
+    if (/^[-*]\s+/.test(line)) return <li key={index}>{line.replace(/^[-*]\s+/, '')}</li>;
+    return <p key={index}>{line}</p>;
+  })}</div>;
+}
+function DocumentOutline({ content, onJump }: { content: string; onJump: (heading: string) => void }) {
+  const headings = content.split('\n').filter((line) => /^#{1,3}\s+/.test(line)).map((line) => ({ depth: line.match(/^#+/)?.[0].length ?? 1, text: line.replace(/^#+\s+/, '') }));
+  if (!headings.length) return <div className="document-outline-empty">Usa H1, H2 o H3 para crear un esquema.</div>;
+  return <nav className="document-outline" aria-label="Esquema del documento"><strong>Esquema</strong>{headings.map((heading, index) => <button key={`${heading.text}-${index}`} className={`outline-depth-${heading.depth}`} onClick={() => onJump(heading.text)}>{heading.text}</button>)}</nav>;
+}
 function DocumentEditor({ project, onBack, onChange, onToast }: { project: Project; onBack: () => void; onChange: (project: Project) => void; onToast: (message: string) => void }) {
   const content = project.data?.document ?? '';
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [outlineOpen, setOutlineOpen] = useState(true);
+  const [findOpen, setFindOpen] = useState(false);
+  const [findTerm, setFindTerm] = useState('');
+  const [replaceTerm, setReplaceTerm] = useState('');
   const updateContent = (next: string) => onChange({ ...project, data: { ...project.data, document: next } });
   const insertSnippet = (snippet: string) => {
     const textarea = textareaRef.current;
@@ -1022,25 +1067,74 @@ function DocumentEditor({ project, onBack, onChange, onToast }: { project: Proje
     updateContent(next);
     window.requestAnimationFrame(() => { textarea.focus(); textarea.setSelectionRange(start + snippet.length, start + snippet.length); });
   };
+  const wrapSelection = (before: string, after: string, fallback: string) => {
+    const textarea = textareaRef.current;
+    if (!textarea) return insertSnippet(`${before}${fallback}${after}`);
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const selected = content.slice(start, end) || fallback;
+    const next = `${content.slice(0, start)}${before}${selected}${after}${content.slice(end)}`;
+    updateContent(next);
+    window.requestAnimationFrame(() => { textarea.focus(); textarea.setSelectionRange(start + before.length, start + before.length + selected.length); });
+  };
+  const importTextFile = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => { updateContent(String(reader.result ?? '')); onToast(`Contenido importado desde ${file.name}`); };
+    reader.readAsText(file);
+    event.target.value = '';
+  };
+  const copyDocument = async () => { try { await copyText(content); onToast('Documento copiado al portapapeles'); } catch { onToast('El navegador no permitió copiar el documento'); } };
+  const replaceAll = () => {
+    if (!findTerm) return onToast('Escribe un término para buscar');
+    const count = content.split(findTerm).length - 1;
+    if (!count) return onToast('No se encontró ese término');
+    updateContent(content.split(findTerm).join(replaceTerm));
+    onToast(`${count} coincidencia${count === 1 ? '' : 's'} reemplazada${count === 1 ? '' : 's'}`);
+  };
+  const jumpToHeading = (heading: string) => {
+    const textarea = textareaRef.current;
+    const index = content.indexOf(`# ${heading}`) >= 0 ? content.indexOf(`# ${heading}`) : content.indexOf(heading);
+    if (!textarea || index < 0) return;
+    textarea.focus(); textarea.setSelectionRange(index, index + heading.length); textarea.scrollTop = Math.max(0, textarea.scrollHeight * (index / Math.max(1, content.length)) - 100);
+  };
   const clearDocument = () => { if (window.confirm('¿Limpiar todo el contenido del documento?')) { updateContent(''); onToast('Documento vacío listo para escribir'); } };
+  const words = content.trim() ? content.trim().split(/\s+/).length : 0;
+  const chars = content.length;
+  const headings = content.split('\n').filter((line) => /^#{1,3}\s+/.test(line)).length;
+  const minutes = Math.max(1, Math.ceil(words / 200));
   return <WorkspaceFrame project={project} onBack={onBack} onExport={(format) => { downloadProject(project, format); onToast('Documento descargado'); }}>
-    <div className="specialized-heading"><div><span className="section-kicker">Editor de documento</span><h1>{project.name}</h1><p>Redacta, estructura y revisa el contenido directamente.</p></div><button className="secondary-button" onClick={() => insertSnippet('- [ ] Nueva tarea')}><Icon name="checklist" size={15} /> Añadir tarea</button></div>
+    <div className="specialized-heading"><div><span className="section-kicker">Editor de documento</span><h1>{project.name}</h1><p>Redacta, estructura, importa y revisa contenido Markdown localmente.</p></div><div className="heading-actions"><button className="secondary-button" onClick={() => fileInputRef.current?.click()}><Icon name="folder" size={15} /> Importar texto</button><button className="secondary-button" onClick={() => insertSnippet('- [ ] Nueva tarea')}><Icon name="checklist" size={15} /> Añadir tarea</button></div></div>
     <div className="document-workspace">
       <div className="document-toolbar" aria-label="Herramientas de formato">
-        <button onClick={() => insertSnippet('# Título')}><strong>H1</strong><span>Título</span></button>
-        <button onClick={() => insertSnippet('## Sección')}><strong>H2</strong><span>Sección</span></button>
-        <button onClick={() => insertSnippet('- Elemento')}><Icon name="checklist" size={15} /><span>Lista</span></button>
-        <button onClick={() => insertSnippet('> Nota importante')}><strong>“</strong><span>Nota</span></button>
-        <button onClick={() => insertSnippet('\n---\n')}><strong>—</strong><span>Separador</span></button>
+        <button onClick={() => insertSnippet('# Título')} title="Insertar título"><strong>H1</strong><span>Título</span></button>
+        <button onClick={() => insertSnippet('## Sección')} title="Insertar sección"><strong>H2</strong><span>Sección</span></button>
+        <button onClick={() => wrapSelection('**', '**', 'texto en negrita')} title="Negrita"><strong>B</strong><span>Negrita</span></button>
+        <button onClick={() => wrapSelection('*', '*', 'texto destacado')} title="Cursiva"><strong>I</strong><span>Cursiva</span></button>
+        <button onClick={() => wrapSelection('[', '](https://)', 'enlace')} title="Enlace"><strong>↗</strong><span>Enlace</span></button>
+        <button onClick={() => insertSnippet('- Elemento')} title="Lista"><Icon name="checklist" size={15} /><span>Lista</span></button>
+        <button onClick={() => insertSnippet('> Nota importante')} title="Nota"><strong>“</strong><span>Nota</span></button>
+        <button onClick={() => insertSnippet('| Columna 1 | Columna 2 |\n| --- | --- |\n| Dato | Dato |')} title="Tabla"><strong>▦</strong><span>Tabla</span></button>
+        <button onClick={() => wrapSelection('```\n', '\n```', 'código')} title="Código"><strong>{'{ }'}</strong><span>Código</span></button>
         <span className="document-toolbar-spacer" />
-        <button className="document-clear" onClick={clearDocument}><Icon name="trash" size={14} /><span>Limpiar</span></button>
+        <button onClick={() => setFindOpen((open) => !open)} title="Buscar y reemplazar"><Icon name="search" size={14} /><span>Buscar</span></button>
+        <button onClick={() => setOutlineOpen((open) => !open)} title="Mostrar esquema"><Icon name="command" size={14} /><span>Esquema</span></button>
+        <button onClick={() => setPreviewOpen((open) => !open)} title="Vista previa"><Icon name="grid" size={14} /><span>{previewOpen ? 'Editar' : 'Preview'}</span></button>
+        <button onClick={copyDocument} title="Copiar documento"><Icon name="copy" size={14} /><span>Copiar</span></button>
+        <button className="document-clear" onClick={clearDocument} title="Limpiar documento"><Icon name="trash" size={14} /><span>Limpiar</span></button>
       </div>
-      <textarea ref={textareaRef} className="document-textarea" value={content} onChange={(event) => updateContent(event.target.value)} spellCheck />
+      {findOpen && <div className="document-findbar"><label>Buscar<input value={findTerm} onChange={(event) => setFindTerm(event.target.value)} placeholder="Palabra o frase" /></label><label>Reemplazar<input value={replaceTerm} onChange={(event) => setReplaceTerm(event.target.value)} placeholder="Nuevo texto" /></label><button className="secondary-button" onClick={replaceAll}>Reemplazar todo</button><span>{findTerm ? `${content.split(findTerm).length - 1} coincidencias` : 'Escribe para buscar'}</span></div>}
+      <input ref={fileInputRef} type="file" accept=".txt,.md,text/plain,text/markdown" hidden onChange={importTextFile} />
+      <div className={`document-layout ${outlineOpen ? '' : 'outline-closed'} ${previewOpen ? 'preview-open' : ''}`}>
+        {outlineOpen && <DocumentOutline content={content} onJump={jumpToHeading} />}
+        <textarea ref={textareaRef} className="document-textarea" value={content} onChange={(event) => updateContent(event.target.value)} spellCheck aria-label="Contenido Markdown del documento" />
+        {previewOpen && <MarkdownPreview content={content} />}
+      </div>
     </div>
-    <div className="specialized-foot">{content.split(/\s+/).filter(Boolean).length} palabras · cambios guardados automáticamente · Markdown compatible</div>
+    <div className="specialized-foot"><span>{words} palabras · {chars} caracteres · {minutes} min de lectura · {headings} títulos</span><span>guardado local automático · Markdown compatible</span></div>
   </WorkspaceFrame>;
 }
-
 function DiagramSlidePreview({ project }: { project: Project }) {
   const type = typeFor(project.type);
   return <div className="diagram-slide-preview"><div className="diagram-slide-preview-head"><span className="project-type-icon" style={{ color: type.color, backgroundColor: type.soft }}><Icon name={type.icon} size={17} /></span><div><strong>{project.name}</strong><small>{type.label} · {project.nodes.length} elementos</small></div></div><div className="diagram-preview-map">{project.nodes.slice(0, 8).map((node) => <span className={`diagram-preview-node node-${node.tone}`} key={node.id}>{node.label}</span>)}</div></div>;
@@ -1059,6 +1153,7 @@ function PresentationEditor({ project, allProjects, onBack, onChange, onToast }:
   const update = (patch: Partial<Slide>) => slide && onChange({ ...project, data: { ...project.data, slides: slides.map((item, index) => index === active ? { ...item, ...patch } : item) } });
   const add = () => { const next = { id: `slide-${Date.now()}`, title: 'Nueva diapositiva', body: 'Añade el contenido de esta diapositiva.' }; onChange({ ...project, data: { ...project.data, slides: [...slides, next] } }); setActive(slides.length); onToast('Diapositiva añadida'); };
   const duplicate = () => { if (!slide) return; const copy = { ...slide, id: `slide-${Date.now()}`, title: `${slide.title || 'Diapositiva'} · copia`, diagramProjectId: undefined }; const next = [...slides.slice(0, active + 1), copy, ...slides.slice(active + 1)]; onChange({ ...project, data: { ...project.data, slides: next } }); setActive(active + 1); onToast('Diapositiva duplicada'); };
+  const moveSlide = (direction: -1 | 1) => { const target = active + direction; if (target < 0 || target >= slides.length) return; const next = [...slides]; [next[active], next[target]] = [next[target], next[active]]; onChange({ ...project, data: { ...project.data, slides: next } }); setActive(target); };
   const remove = () => { if (slides.length <= 1) return; const next = slides.filter((_, index) => index !== active); onChange({ ...project, data: { ...project.data, slides: next } }); setActive(Math.max(0, active - 1)); };
   const refreshDiagrams = () => {
     const syncedSlides = syncPresentationSlides(slides, diagramProjects);
@@ -1067,7 +1162,7 @@ function PresentationEditor({ project, allProjects, onBack, onChange, onToast }:
     onToast(`${diagramProjects.length} diagramas incluidos en la presentación`);
   };
   const linkedProject = slide?.diagramProjectId ? allProjects.find((item) => item.id === slide.diagramProjectId) : undefined;
-  return <WorkspaceFrame project={project} onBack={onBack} onExport={(format) => { downloadProject(project, format); onToast('Presentación descargada'); }}><div className="specialized-heading"><div><span className="section-kicker">Editor de presentación</span><h1>{project.name}</h1><p>Construye la narrativa y presenta todos los diagramas de tu espacio.</p></div><div className="heading-actions"><button className="secondary-button" onClick={refreshDiagrams}><Icon name="grid" size={15} /> Actualizar diagramas</button><button className="secondary-button" onClick={duplicate} disabled={!slide}><Icon name="copy" size={15} /> Duplicar diapositiva</button></div></div><div className="presentation-workspace"><aside className="slide-list"><div className="slide-list-heading"><span>Diapositivas</span><small>{diagramProjects.length} diagramas</small></div>{slides.map((item, index) => <button className={`slide-thumb ${index === active ? 'is-active' : ''} ${item.diagramProjectId ? 'is-diagram' : ''}`} key={item.id} onClick={() => setActive(index)}><span>{index + 1}</span><strong>{item.title || 'Sin título'}</strong>{item.diagramProjectId && <em>Diagrama</em>}</button>)}<button className="add-slide" onClick={add}><Icon name="plus" size={14} /> Añadir diapositiva</button></aside><section className="slide-editor">{slide && <><div className="slide-editor-toolbar"><span>{linkedProject ? 'Diagrama incluido' : 'Contenido editable'}</span><span>{active + 1} / {slides.length}</span></div>{linkedProject && <DiagramSlidePreview project={linkedProject} />}<input className="slide-title-input" value={slide.title} onChange={(event) => update({ title: event.target.value })} placeholder="Título de la diapositiva" /><textarea className="slide-body-input" value={slide.body} onChange={(event) => update({ body: event.target.value })} placeholder="Contenido, notas o instrucciones" /><button className="delete-slide" onClick={remove} disabled={slides.length <= 1}><Icon name="trash" size={14} /> Eliminar diapositiva</button></>}</section></div></WorkspaceFrame>;
+  return <WorkspaceFrame project={project} onBack={onBack} onExport={(format) => { downloadProject(project, format); onToast('Presentación descargada'); }}><div className="specialized-heading"><div><span className="section-kicker">Editor de presentación</span><h1>{project.name}</h1><p>Construye la narrativa y presenta todos los diagramas de tu espacio.</p></div><div className="heading-actions"><button className="secondary-button" onClick={refreshDiagrams}><Icon name="grid" size={15} /> Actualizar diagramas</button><button className="secondary-button" onClick={duplicate} disabled={!slide}><Icon name="copy" size={15} /> Duplicar diapositiva</button></div></div><div className="presentation-workspace"><aside className="slide-list"><div className="slide-list-heading"><span>Diapositivas</span><small>{diagramProjects.length} diagramas</small></div>{slides.map((item, index) => <button className={`slide-thumb ${index === active ? 'is-active' : ''} ${item.diagramProjectId ? 'is-diagram' : ''}`} key={item.id} onClick={() => setActive(index)}><span>{index + 1}</span><strong>{item.title || 'Sin título'}</strong>{item.diagramProjectId && <em>Diagrama</em>}</button>)}<button className="add-slide" onClick={add}><Icon name="plus" size={14} /> Añadir diapositiva</button></aside><section className="slide-editor">{slide && <><div className="slide-editor-toolbar"><span>{linkedProject ? 'Diagrama incluido' : 'Contenido editable'}</span><span>{active + 1} / {slides.length}</span><div className="slide-quick-actions"><button onClick={() => moveSlide(-1)} disabled={active === 0} title="Mover arriba">↑</button><button onClick={() => moveSlide(1)} disabled={active === slides.length - 1} title="Mover abajo">↓</button></div></div>{linkedProject && <DiagramSlidePreview project={linkedProject} />}<input className="slide-title-input" value={slide.title} onChange={(event) => update({ title: event.target.value })} placeholder="Título de la diapositiva" /><label className="slide-diagram-picker">Vincular diagrama<select value={slide.diagramProjectId ?? ''} onChange={(event) => update({ diagramProjectId: event.target.value || undefined })}><option value="">Sin diagrama</option>{diagramProjects.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label><textarea className="slide-body-input" value={slide.body} onChange={(event) => update({ body: event.target.value })} placeholder="Contenido, notas o instrucciones" /><button className="delete-slide" onClick={remove} disabled={slides.length <= 1}><Icon name="trash" size={14} /> Eliminar diapositiva</button></>}</section></div></WorkspaceFrame>;
 }
 
 function BoardEditor({ project, onBack, onChange, onToast }: { project: Project; onBack: () => void; onChange: (project: Project) => void; onToast: (message: string) => void }) {

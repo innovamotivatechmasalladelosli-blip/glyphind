@@ -79,3 +79,8 @@
 - [ ] Implementar colaboración opt-in con Yjs/WebRTC. Sigue sin compartirse contenido ni usar señalización remota hasta definir el flujo de conexión, manejo de conflictos y consentimiento explícito por proyecto.
 - [x] Recuperación práctica: con snapshot válido y workspace activo corrupto, la app restauró el proyecto y mostró aviso, sin errores de consola.
 - [ ] Medir rendimiento p95 y carga de proyectos grandes en móviles físicos.
+
+
+## Herramientas ampliadas incorporadas
+
+La entrega actual incluye en Documentos la importación `.txt/.md`, formato Markdown, tablas, código, enlaces, búsqueda/reemplazo, esquema navegable, preview, copiar y métricas. Presentaciones permite vincular diagramas, duplicar y reordenar diapositivas. Todos los editores exponen utilidades para copiar JSON y descargar `.glyphind`; la plataforma remota conserva además historial con diff, Mermaid/Excalidraw, generación desde texto, editores de matriz/ciclo/conjuntos, conectores semánticos, compartir desde PWA y lectura URL con consentimiento.
