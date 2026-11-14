@@ -10,6 +10,8 @@ export type DiagramNode = {
   shape?: NodeShape;
   colorHex?: string;
   sourceUrl?: string;
+  linkedProjectId?: string;
+  linkedProjectMode?: 'open' | 'embed';
   content?: string;
   evidenceId?: string;
   inference?: 'user' | 'rules' | 'local-model';
@@ -52,12 +54,13 @@ export type GlyphindOperationChange = { entity: string; id: string; field: strin
 export type GlyphindOperation = { id: string; at: string; type: string; summary: string; changes?: GlyphindOperationChange[] };
 
 export type Slide = { id: string; title: string; body: string; diagramProjectId?: string };
+export type DocumentPage = { id: string; title: string; content: string };
 export type BoardCard = { id: string; title: string; detail: string };
 export type BoardColumn = { id: string; title: string; cards: BoardCard[]; wipLimit?: number };
 export type TimelineItem = { id: string; title: string; date: string; detail: string; duration?: string; dependsOn?: string[] };
 export type MatrixData = { columns: string[]; cells: Record<string, Record<string, string>> };
 export type CycleData = { closedLoop: boolean };
-export type ProjectData = { document?: string; slides?: Slide[]; board?: BoardColumn[]; timeline?: TimelineItem[]; matrix?: MatrixData; cycle?: CycleData };
+export type ProjectData = { document?: string; documentPages?: DocumentPage[]; slides?: Slide[]; board?: BoardColumn[]; timeline?: TimelineItem[]; matrix?: MatrixData; cycle?: CycleData };
 
 export type Project = {
   schemaVersion: 1;
@@ -106,6 +109,8 @@ function normalizeNode(input: Partial<DiagramNode>, index: number): DiagramNode 
     ...(input.shape ? { shape: input.shape } : {}),
     ...(input.colorHex ? { colorHex: String(input.colorHex) } : {}),
     ...(input.sourceUrl ? { sourceUrl: String(input.sourceUrl) } : {}),
+    ...(input.linkedProjectId ? { linkedProjectId: String(input.linkedProjectId) } : {}),
+    ...(input.linkedProjectMode === 'open' || input.linkedProjectMode === 'embed' ? { linkedProjectMode: input.linkedProjectMode } : {}),
     ...(input.content ? { content: String(input.content) } : {}),
     ...(input.evidenceId ? { evidenceId: String(input.evidenceId) } : {}),
     inference: input.inference || 'user',

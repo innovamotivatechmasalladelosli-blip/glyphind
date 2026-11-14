@@ -1139,3 +1139,22 @@ kbd { padding: 2px 4px; border: 1px solid #dcdad2; border-radius: 3px; color: #8
 .slide-quick-actions button:disabled { opacity: .3; }
 .slide-diagram-picker { display: grid; gap: 6px; color: #98958d; font: 500 9px 'DM Mono', monospace; }
 .slide-diagram-picker select { width: 100%; padding: 9px; border: 1px solid var(--line); border-radius: 7px; color: #55544e; background: #fff; font: 400 11px 'DM Sans', sans-serif; }
+
+/* Documento multipágina y controles de edición tipo procesador de texto. */
+.document-pages-bar { display: flex; align-items: end; gap: 8px; overflow-x: auto; margin: 18px 0 0; padding: 0 2px; border-bottom: 1px solid var(--line); scrollbar-width: thin; }
+.document-page-tabs { display: flex; align-items: end; gap: 4px; min-width: max-content; }
+.document-page-tabs button { display: inline-flex; align-items: center; gap: 7px; min-width: 112px; padding: 10px 12px; border: 1px solid transparent; border-bottom: 0; border-radius: 8px 8px 0 0; color: #96938a; background: transparent; font-size: 11px; text-align: left; white-space: nowrap; }
+.document-page-tabs button:hover { color: var(--ink); background: #f6f4ef; }
+.document-page-tabs button.is-active { color: var(--ink); border-color: var(--line); background: #fffefa; font-weight: 700; }
+.document-page-tabs button span { display: grid; place-items: center; width: 19px; height: 19px; border-radius: 5px; color: #9a978e; background: #eeeae3; font: 500 9px 'DM Mono', monospace; }
+.document-page-tabs button.is-active span { color: #fff; background: var(--accent); }
+.document-page-add { display: inline-flex; align-items: center; gap: 5px; margin-bottom: 7px; padding: 7px 10px; border: 1px dashed #d7d3c9; border-radius: 7px; color: #8a877e; background: transparent; font-size: 10px; white-space: nowrap; }
+.document-page-add:hover { color: var(--ink); border-color: var(--accent); background: #fff; }
+.document-page-controls { display: flex; align-items: center; gap: 6px; max-width: 1020px; margin: 9px auto -2px; }
+.document-page-controls input { min-width: 130px; flex: 1; border: 0; border-bottom: 1px solid #e4e1d9; outline: 0; color: #595750; background: transparent; padding: 6px 3px; font-size: 11px; font-weight: 700; }
+.document-page-controls button { padding: 6px 9px; border: 1px solid #e3e0d8; border-radius: 6px; color: #858279; background: #fffefa; font-size: 10px; }
+.document-page-controls button:hover { color: var(--ink); border-color: var(--accent); }
+.document-page-controls .document-danger { color: #b87868; }
+@media (max-width: 720px) { .document-pages-bar { margin-top: 12px; } .document-page-tabs button { min-width: 94px; padding: 9px 8px; } .document-page-controls { flex-wrap: wrap; } .document-page-controls input { flex-basis: 100%; } .document-page-controls button { flex: 1; min-height: 38px; } }
+.linked-block-help { margin: -2px 0 10px; color: #8f8c83; font-size: 10px; line-height: 1.45; }
+.linked-block-badge { display: inline-block; margin-top: 5px; color: #7d6bb0; font: 500 9px 'DM Mono', monospace; font-style: normal; }
