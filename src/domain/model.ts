@@ -1,9 +1,11 @@
 export type NodeShape = 'card' | 'circle' | 'pill' | 'diamond' | 'hexagon';
+export type BlockKind = 'text' | 'image' | 'source' | 'table' | 'diagram';
 
 export type DiagramNode = {
   id: string;
   label: string;
   detail: string;
+  kind?: BlockKind;
   x: number;
   y: number;
   tone: string;
@@ -103,6 +105,7 @@ function normalizeNode(input: Partial<DiagramNode>, index: number): DiagramNode 
     id: String(input.id || `node-${index + 1}`),
     label: String(input.label || `Elemento ${index + 1}`),
     detail: String(input.detail || ''),
+    ...(input.kind === 'text' || input.kind === 'image' || input.kind === 'source' || input.kind === 'table' || input.kind === 'diagram' ? { kind: input.kind } : {}),
     x: Number.isFinite(input.x) ? Number(input.x) : 15 + (index % 4) * 22,
     y: Number.isFinite(input.y) ? Number(input.y) : 20 + Math.floor(index / 4) * 24,
     tone: String(input.tone || ['blue', 'lilac', 'green', 'orange'][index % 4]),
