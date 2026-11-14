@@ -528,6 +528,7 @@ function App() {
   const [toast, setToast] = useState('');
   const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
   const [isInstalled, setIsInstalled] = useState(() => window.matchMedia?.('(display-mode: standalone)').matches || Boolean((navigator as Navigator & { standalone?: boolean }).standalone));
+  const [installHelpOpen, setInstallHelpOpen] = useState(false);
   const importInputRef = useRef<HTMLInputElement>(null);
   const toggleProjectMenu = (projectId: string, event: ReactMouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
@@ -602,7 +603,7 @@ function App() {
   }, []);
 
   const installApp = async () => {
-    if (!installPrompt) { setToast('En el menú del navegador elige «Instalar aplicación» o «Añadir a pantalla de inicio»'); return; }
+    if (!installPrompt) { setInstallHelpOpen(true); return; }
     await installPrompt.prompt();
     const choice = await installPrompt.userChoice;
     if (choice.outcome === 'accepted') setToast('Instalación iniciada');
@@ -1008,6 +1009,7 @@ function App() {
       </main>
 
       {modal && <ProjectModal mode={modal} name={draftName} type={draftType} setName={setDraftName} setType={setDraftType} onSubmit={submitProject} onClose={() => setModal(null)} />}
+      {installHelpOpen && <InstallHelpModal onClose={() => setInstallHelpOpen(false)} />}
       {showAiBuilder && <AiBuilderModal question={aiBuilderQuestion} setQuestion={setAiBuilderQuestion} name={aiBuilderName} setName={setAiBuilderName} type={aiBuilderType} setType={setAiBuilderType} text={aiBuilderText} setText={setAiBuilderText} url={aiBuilderUrl} setUrl={(value) => { setAiBuilderUrl(value); setProxyPromptUrl(''); setProxyPromptOpen(false); setAiBuilderError(''); }} mode={aiBuilderMode} setMode={setAiBuilderMode} busy={aiBuilderBusy} progress={aiBuilderProgress} error={aiBuilderError} proxyAvailable={Boolean(proxyPromptUrl && !proxyPromptOpen)} onOpenProxyConsent={() => setProxyPromptOpen(true)} onSubmit={createDiagramFromText} onClose={() => { if (!aiBuilderBusy) setShowAiBuilder(false); }} />}
       {showAiBuilder && proxyPromptUrl && proxyPromptOpen && !aiBuilderBusy && <UrlProxyConsent url={proxyPromptUrl} busy={aiBuilderBusy} error={aiBuilderError} onCancel={() => setProxyPromptOpen(false)} onConfirm={confirmProxyRead} />}
       {toast && <div className="toast" role="status" aria-live="polite"><span className="toast-check">✓</span>{toast}</div>}
@@ -1573,6 +1575,12 @@ function Editor({ project, allProjects, onBack, onChange, onToast, onTemplatesCh
 
 createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>);
 
+
+function InstallHelpModal({ onClose }: { onClose: () => void }) {
+  const appUrl = 'https://innovamotivatechmasalladelosli-blip.github.io/glyphind/?source=pwa';
+  const chromeIntent = 'intent://innovamotivatechmasalladelosli-blip.github.io/glyphind/?source=pwa#Intent;scheme=https;package=com.android.chrome;end';
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}><section className="project-modal install-help-modal" role="dialog" aria-modal="true" aria-labelledby="install-help-title"><div className="modal-head"><div><span className="section-kicker">Instalar Glyphind</span><h2 id="install-help-title">El visor actual no puede instalar aplicaciones web.</h2><p className="ai-builder-intro">Abre Glyphind en Chrome para que Android muestre el instalador real. Tus proyectos permanecen guardados en este dispositivo.</p></div><button type="button" className="icon-button" onClick={onClose} aria-label="Cerrar"><Icon name="close" /></button></div><ol className="install-steps"><li>Abre Glyphind en Chrome con el botón de abajo.</li><li>Espera a que cargue la página y pulsa <strong>Instalar como app</strong>.</li><li>Confirma la instalación. El botón desaparecerá al abrirla como aplicación.</li></ol><div className="modal-foot"><a className="primary-button" href={chromeIntent}>Abrir en Chrome</a><a className="secondary-button" href={appUrl}>Abrir en navegador</a></div></section></div>;
+}
 
 function AiBuilderModal({ question, setQuestion, name, setName, type, setType, text, setText, url, setUrl, mode, setMode, busy, progress, error, proxyAvailable, onOpenProxyConsent, onSubmit, onClose }: {
   question: string;

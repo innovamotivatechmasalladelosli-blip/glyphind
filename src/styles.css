@@ -1168,3 +1168,8 @@ kbd { padding: 2px 4px; border: 1px solid #dcdad2; border-radius: 3px; color: #8
 .ecosystem-strip span { flex: 0 0 auto; padding: 6px 10px; border-radius: 6px; font: 500 10px 'DM Mono', monospace; letter-spacing: .02em; }
 .ecosystem-strip span.is-active { color: #5d5a52; background: #ebe8e0; }
 @media (max-width: 720px) { .ecosystem-strip { padding-left: 12px; padding-right: 12px; } .ecosystem-strip span { padding: 7px 9px; } }
+.install-help-modal { max-width: 560px; }
+.install-steps { display: grid; gap: 12px; margin: 8px 0 22px; padding-left: 22px; color: #67655d; font-size: 13px; line-height: 1.55; }
+.install-steps li::marker { color: var(--accent); font-weight: 800; }
+.install-help-modal .modal-foot { justify-content: flex-end; }
+.install-help-modal .modal-foot a { text-decoration: none; }
