@@ -507,6 +507,9 @@ function App() {
   const [localTemplates, setLocalTemplates] = useState<LocalTemplate[]>(() => readLocalTemplates(localStorage));
   const [formatPlugins, setFormatPlugins] = useState<FormatPlugin[]>(() => readFormatPlugins());
   const [showAiBuilder, setShowAiBuilder] = useState(false);
+  const [combineOpen, setCombineOpen] = useState(false);
+  const [combineIds, setCombineIds] = useState<string[]>([]);
+  const [combineType, setCombineType] = useState<'flow' | 'document' | 'presentation'>('flow');
   const [aiBuilderQuestion, setAiBuilderQuestion] = useState('');
   const [aiBuilderText, setAiBuilderText] = useState('');
   const [aiBuilderUrl, setAiBuilderUrl] = useState('');
@@ -734,6 +737,33 @@ function App() {
     setDraftName('');
     setDraftType('flow');
     setModal('new');
+  };
+
+  const openCombineModal = () => {
+    setCombineIds(projects.slice(0, 2).map((project) => project.id));
+    setCombineType('flow');
+    setCombineOpen(true);
+  };
+  const combineSelectedProjects = () => {
+    const selected = projects.filter((project) => combineIds.includes(project.id));
+    if (selected.length < 2) { setToast('Selecciona al menos 2 proyectos para combinarlos'); return; }
+    const baseName = selected.map((project) => project.name).join(' + ');
+    const combined = createProject(`Combinado · ${baseName}`, combineType, selected);
+    if (combineType === 'flow') {
+      const nodes = selected.flatMap((project, projectIndex) => project.nodes.map((node, nodeIndex) => ({ ...node, id: `combined-${projectIndex}-${node.id}`, x: Math.min(86, 10 + (nodeIndex % 4) * 24), y: Math.min(86, 12 + projectIndex * 24 + Math.floor(nodeIndex / 4) * 18), label: projectIndex === 0 ? node.label : `${project.name}: ${node.label}` })));
+      const edges = selected.flatMap((project, projectIndex) => project.edges.map((edge) => ({ ...edge, id: `combined-${projectIndex}-${edge.id}`, from: `combined-${projectIndex}-${edge.from}`, to: `combined-${projectIndex}-${edge.to}` })));
+      const pages = [{ id: 'page-main', title: 'Proyecto combinado', nodeIds: nodes.map((node) => node.id), edgeIds: edges.map((edge) => edge.id) }];
+      combined.nodes = nodes; combined.edges = edges; combined.pages = pages;
+    } else if (combineType === 'document') {
+      const content = selected.map((project, index) => `# ${index + 1}. ${project.name}\n\n${project.data?.document || project.nodes.map((node) => `## ${node.label}\n${node.detail || ''}`).join('\n\n')}`).join('\n\n---\n\n');
+      combined.data = { ...combined.data, document: content, documentPages: [{ id: `page-${Date.now()}`, title: 'Contenido combinado', content }] };
+    } else {
+      combined.data = { ...combined.data, slides: selected.flatMap((project, index) => [{ id: `slide-${Date.now()}-${index}`, title: project.name, body: project.data?.document || project.nodes.map((node) => `${node.label}: ${node.detail || ''}`).join('\n'), diagramProjectId: project.id }]) };
+    }
+    setProjects((current) => [combined, ...current]);
+    setCombineOpen(false);
+    openProject(combined);
+    setToast(`Se combinaron ${selected.length} proyectos en ${combineType === 'flow' ? 'un flujo' : combineType === 'document' ? 'un documento' : 'una presentación'}`);
   };
 
   const openAiBuilder = () => {
@@ -981,6 +1011,10 @@ function App() {
               <span className="quick-action-icon"><Icon name="arrow" size={17} /></span>
               <span><strong>Exportar respaldo</strong><small>Guarda una copia local</small></span>
             </button>
+            <button className="quick-action quick-action-combine" onClick={openCombineModal} disabled={projects.length < 2}>
+              <span className="quick-action-icon"><Icon name="copy" size={17} /></span>
+              <span><strong>Combinar proyectos</strong><small>{projects.length < 2 ? 'Crea al menos 2 proyectos' : 'Únelos en mapa, documento o presentación'}</small></span>
+            </button>
           </section>
 
           <section className="project-toolbar" aria-label="Buscar y filtrar proyectos">
@@ -1018,6 +1052,7 @@ function App() {
 
       {modal && <ProjectModal mode={modal} name={draftName} type={draftType} setName={setDraftName} setType={setDraftType} onSubmit={submitProject} onClose={() => setModal(null)} />}
       {installHelpOpen && <InstallHelpModal onClose={() => setInstallHelpOpen(false)} />}
+      {combineOpen && <CombineProjectsModal projects={projects} selectedIds={combineIds} outputType={combineType} onToggle={(id) => setCombineIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id])} onOutputTypeChange={setCombineType} onSubmit={combineSelectedProjects} onClose={() => setCombineOpen(false)} />}
       {showAiBuilder && <AiBuilderModal question={aiBuilderQuestion} setQuestion={setAiBuilderQuestion} name={aiBuilderName} setName={setAiBuilderName} type={aiBuilderType} setType={setAiBuilderType} text={aiBuilderText} setText={setAiBuilderText} url={aiBuilderUrl} setUrl={(value) => { setAiBuilderUrl(value); setProxyPromptUrl(''); setProxyPromptOpen(false); setAiBuilderError(''); }} mode={aiBuilderMode} setMode={setAiBuilderMode} busy={aiBuilderBusy} progress={aiBuilderProgress} error={aiBuilderError} proxyAvailable={Boolean(proxyPromptUrl && !proxyPromptOpen)} onOpenProxyConsent={() => setProxyPromptOpen(true)} onSubmit={createDiagramFromText} onClose={() => { if (!aiBuilderBusy) setShowAiBuilder(false); }} />}
       {showAiBuilder && proxyPromptUrl && proxyPromptOpen && !aiBuilderBusy && <UrlProxyConsent url={proxyPromptUrl} busy={aiBuilderBusy} error={aiBuilderError} onCancel={() => setProxyPromptOpen(false)} onConfirm={confirmProxyRead} />}
       {toast && <div className="toast" role="status" aria-live="polite"><span className="toast-check">✓</span>{toast}</div>}
@@ -1657,4 +1692,16 @@ function AiBuilderModal({ question, setQuestion, name, setName, type, setType, t
       </form>
     </div>
   );
+}
+
+function CombineProjectsModal({ projects, selectedIds, outputType, onToggle, onOutputTypeChange, onSubmit, onClose }: {
+  projects: Project[];
+  selectedIds: string[];
+  outputType: 'flow' | 'document' | 'presentation';
+  onToggle: (id: string) => void;
+  onOutputTypeChange: (type: 'flow' | 'document' | 'presentation') => void;
+  onSubmit: () => void;
+  onClose: () => void;
+}) {
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}><section className="project-modal combine-projects-modal" role="dialog" aria-modal="true" aria-labelledby="combine-title"><div className="modal-head"><div><span className="section-kicker">Ecosistema de trabajo</span><h2 id="combine-title">Combinar proyectos</h2><p className="ai-builder-intro">Selecciona proyectos y conviértelos en un resultado nuevo. Los originales no se modifican.</p></div><button type="button" className="icon-button" onClick={onClose} aria-label="Cerrar"><Icon name="close" /></button></div><span className="field-label">1. Elige qué proyectos quieres unir</span><div className="combine-project-list">{projects.map((project) => <label className="combine-project-option" key={project.id}><input type="checkbox" checked={selectedIds.includes(project.id)} onChange={() => onToggle(project.id)} /><span><strong>{project.name}</strong><small>{typeFor(project.type).label} · {project.nodes.length} elementos</small></span></label>)}</div><span className="field-label">2. Decide qué quieres obtener</span><div className="combine-output-grid">{([['flow', 'Mapa / flujo', 'Un lienzo con todos los bloques'], ['document', 'Documento', 'Un texto ordenado por proyecto'], ['presentation', 'Presentación', 'Una diapositiva por proyecto']] as const).map(([value, label, description]) => <button type="button" className={`combine-output-option ${outputType === value ? 'is-active' : ''}`} key={value} onClick={() => onOutputTypeChange(value)}><strong>{label}</strong><small>{description}</small></button>)}</div><div className="modal-foot"><span>{selectedIds.length} seleccionados · puedes editar el resultado después</span><div><button type="button" className="secondary-button" onClick={onClose}>Cancelar</button><button type="button" className="primary-button" onClick={onSubmit} disabled={selectedIds.length < 2}>Combinar ahora</button></div></div></section></div>;
 }

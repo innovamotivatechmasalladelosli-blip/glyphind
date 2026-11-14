@@ -1181,3 +1181,17 @@ kbd { padding: 2px 4px; border: 1px solid #dcdad2; border-radius: 3px; color: #8
 .app-error-card p { margin: 0; color: #77756e; line-height: 1.55; }
 .app-error-card code { display: block; overflow-wrap: anywhere; padding: 10px 12px; border-radius: 8px; color: #9a503c; background: #fff0e9; font: 11px 'DM Mono', monospace; }
 .app-error-card > div { display: flex; flex-wrap: wrap; gap: 8px; }
+.quick-action-combine { border-color: #d8cdf2; background: #faf7ff; }
+.quick-action-combine .quick-action-icon { color: #7957a9; background: #eee6fb; }
+.quick-action:disabled { cursor: not-allowed; opacity: .55; }
+.combine-projects-modal { width: min(100%, 650px); }
+.combine-project-list { display: grid; gap: 8px; max-height: 260px; overflow: auto; margin: 4px 0 20px; }
+.combine-project-option { display: flex; align-items: center; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 9px; background: #fff; color: #55544e; text-align: left; }
+.combine-project-option:has(input:checked) { border-color: #bfa8e5; background: #faf7ff; }
+.combine-project-option input { accent-color: #7957a9; }
+.combine-project-option strong { font-size: 12px; }
+.combine-project-option small { display: block; margin-top: 3px; color: #99978f; font-size: 10px; }
+.combine-output-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 8px 0 18px; }
+.combine-output-option { padding: 11px 8px; border: 1px solid var(--line); border-radius: 8px; color: #69675f; background: #fff; font-size: 11px; }
+.combine-output-option.is-active { border-color: var(--ink); color: #fff; background: var(--ink); }
+@media (max-width: 620px) { .combine-output-grid { grid-template-columns: 1fr; } }
