@@ -52,5 +52,5 @@ export function analyzeLocally(raw: string, sourceUrl: string | undefined, mode:
 
 export const localAiModes = {
   rules: { label: 'Reglas offline', description: 'Parser local, sin descarga y sin red.' },
-  model: { label: 'IA semántica local', description: 'Multilingual E5 compara la fuente con sus frases y prioriza hasta dos fragmentos literales. Se ejecuta en este dispositivo; la primera descarga requiere conexión.' },
+  model: { label: 'Ensamble local comprimido', description: 'Multilingual E5 prioriza relevancia y MiniLM multilingüe elimina frases repetidas para formar una síntesis diversa. Ambos modelos se ejecutan en este dispositivo; la primera descarga requiere conexión.' },
 } as const;

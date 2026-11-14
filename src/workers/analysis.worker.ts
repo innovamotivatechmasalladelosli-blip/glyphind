@@ -1,5 +1,5 @@
 import type { GlyphindSource } from '../domain/model';
-import { selectSemanticSentences, splitSummarySentences } from '../domain/semantic-summary';
+import { selectEnsembleSentences, selectSemanticSentences, splitSummarySentences } from '../domain/semantic-summary';
 
 export type LocalAnalysisMode = 'rules' | 'model';
 export type AnalysisEvidence = Pick<GlyphindSource, 'kind' | 'title' | 'url' | 'fragment' | 'selector' | 'generatedBy' | 'confidence'> & { text: string };
@@ -84,20 +84,20 @@ function buildResult(raw: string, sourceUrl?: string): LocalAnalysisResult {
 
 type EmbeddingTensor = { data: ArrayLike<number>; dims: number[] };
 type EmbeddingGenerator = (inputs: string[], options?: Record<string, unknown>) => Promise<EmbeddingTensor>;
-let generator: EmbeddingGenerator | null = null;
-const MODEL_ID = 'Xenova/multilingual-e5-small';
+const generators: Partial<Record<'relevance' | 'diversity', EmbeddingGenerator>> = {};
+const MODEL_IDS = { relevance: 'Xenova/multilingual-e5-small', diversity: 'Xenova/paraphrase-multilingual-MiniLM-L12-v2' } as const;
 
 function reportProgress(id: number, progress: LocalAnalysisProgress) {
   self.postMessage({ id, ok: true, progress } satisfies AnalyzeResponse);
 }
 
-async function selectWithLocalModel(queryText: string, text: string, requestId: number) {
-  if (!generator) {
-    reportProgress(requestId, { stage: 'downloading' });
+async function loadModel(kind: 'relevance' | 'diversity', requestId: number) {
+  if (!generators[kind]) {
+    reportProgress(requestId, { stage: 'downloading', file: MODEL_IDS[kind] });
     const transformers = await import('@huggingface/transformers');
     transformers.env.useBrowserCache = true;
     transformers.env.allowLocalModels = false;
-    generator = await transformers.pipeline('feature-extraction', MODEL_ID, {
+    generators[kind] = await transformers.pipeline('feature-extraction', MODEL_IDS[kind], {
       dtype: 'q8',
       progress_callback: (event: { status?: string; file?: string; progress?: number }) => {
         const stage = event.status === 'progress' || event.status === 'download' ? 'downloading' : 'loading';
@@ -105,26 +105,47 @@ async function selectWithLocalModel(queryText: string, text: string, requestId: 
       },
     }) as unknown as EmbeddingGenerator;
   }
-  const currentGenerator = generator;
-  if (!currentGenerator) throw new Error('El generador local no está disponible.');
+  const currentGenerator = generators[kind];
+  if (!currentGenerator) throw new Error(`El modelo local ${MODEL_IDS[kind]} no está disponible.`);
+  return currentGenerator;
+}
+
+function vectorsFrom(output: EmbeddingTensor, rows: number, width: number) {
+  if (!width || output.data.length < rows * width) throw new Error('Uno de los modelos locales devolvió embeddings incompletos.');
+  return Array.from({ length: rows }, (_, row) => Array.from({ length: width }, (_, column) => Number(output.data[row * width + column])));
+}
+
+async function selectWithLocalModel(queryText: string, text: string, requestId: number) {
+  const relevanceGenerator = await loadModel('relevance', requestId);
   const sentences = splitSummarySentences(text);
   if (!sentences.length) throw new Error('No hay frases suficientemente largas para clasificar semánticamente.');
-  reportProgress(requestId, { stage: 'generating' });
-  const inputs = [`query: ${queryText.slice(0, 1800)}`, ...sentences.map((sentence) => `passage: ${sentence}`)];
-  const output = await currentGenerator(inputs, { pooling: 'mean', normalize: true });
-  const [rows, width] = output.dims;
-  if (rows !== inputs.length || !width || output.data.length < rows * width) throw new Error('El modelo local devolvió embeddings incompletos.');
-  const vectors = Array.from({ length: rows }, (_, row) => Array.from({ length: width }, (_, column) => Number(output.data[row * width + column])));
-  const query = vectors[0];
-  const scores = vectors.slice(1).map((vector) => {
+  reportProgress(requestId, { stage: 'generating', file: 'ensamble: relevancia + diversidad' });
+  const relevanceInputs = [`query: ${queryText.slice(0, 1800)}`, ...sentences.map((sentence) => `passage: ${sentence}`)];
+  const relevanceOutput = await relevanceGenerator(relevanceInputs, { pooling: 'mean', normalize: true });
+  const [rows, width] = relevanceOutput.dims;
+  if (rows !== relevanceInputs.length) throw new Error('El modelo de relevancia devolvió filas incompletas.');
+  const relevanceVectors = vectorsFrom(relevanceOutput, rows, width);
+  const query = relevanceVectors[0];
+  const scores = relevanceVectors.slice(1).map((vector) => {
     const dot = vector.reduce((sum, value, index) => sum + value * query[index], 0);
     const normA = Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0));
     const normB = Math.sqrt(query.reduce((sum, value) => sum + value * value, 0));
     return normA && normB ? dot / (normA * normB) : Number.NaN;
   });
-  const selected = selectSemanticSentences(sentences, scores, 6);
-  if (!selected.length) throw new Error('No se pudo puntuar ninguna frase de la fuente. Se conserva la extracción local.');
-  return selected;
+  try {
+    const diversityGenerator = await loadModel('diversity', requestId);
+    const diversityOutput = await diversityGenerator(sentences, { pooling: 'mean', normalize: true });
+    const [diversityRows, diversityWidth] = diversityOutput.dims;
+    if (diversityRows !== sentences.length) throw new Error('El modelo de diversidad devolvió filas incompletas.');
+    const diversityVectors = vectorsFrom(diversityOutput, diversityRows, diversityWidth);
+    const selected = selectEnsembleSentences(sentences, scores, diversityVectors, 6);
+    if (!selected.length) throw new Error('El ensamble no pudo seleccionar frases sustentadas.');
+    return { selected, modelId: `${MODEL_IDS.relevance} + ${MODEL_IDS.diversity}` };
+  } catch (error) {
+    const selected = selectSemanticSentences(sentences, scores, 6);
+    if (!selected.length) throw error;
+    return { selected, modelId: MODEL_IDS.relevance, modelError: error instanceof Error ? error.message : 'El segundo modelo no pudo cargar.' };
+  }
 }
 
 self.onmessage = async (event: MessageEvent<AnalyzeRequest>) => {
@@ -135,10 +156,12 @@ self.onmessage = async (event: MessageEvent<AnalyzeRequest>) => {
       if (request.mode === 'model') {
         try {
           const sourceText = result.paragraphs.join(' ') || result.summary;
-          result.keySentences = await selectWithLocalModel(`${result.title}. ${result.summary}`, sourceText, request.id);
+          const modelResult = await selectWithLocalModel(`${result.title}. ${result.summary}`, sourceText, request.id);
+          result.keySentences = modelResult.selected;
           result.summary = result.keySentences.slice(0, 2).join(' ');
         result.modelUsed = true;
-        result.modelId = MODEL_ID;
+        result.modelId = modelResult.modelId;
+        result.modelError = modelResult.modelError;
       } catch (error) {
         result.modelUsed = false;
         result.modelError = error instanceof Error ? error.message : 'No se pudo descargar o ejecutar el modelo compacto.';

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { selectSemanticSentences, splitSummarySentences } from './semantic-summary';
+import { selectEnsembleSentences, selectSemanticSentences, splitSummarySentences } from './semantic-summary';
 
 test('divide el texto en fragmentos con puntuación, conservando la frase literal', () => {
   assert.deepEqual(splitSummarySentences('La app guarda proyectos en IndexedDB. La información permanece en el dispositivo.'),
@@ -17,4 +17,10 @@ test('deduplica frases y rechaza vectores incompletos o scores no finitos', () =
   assert.deepEqual(selectSemanticSentences([sentence, sentence], [0.7, 0.9], 2), [sentence]);
   assert.deepEqual(selectSemanticSentences([sentence], [], 2), []);
   assert.deepEqual(selectSemanticSentences([sentence], [Number.NaN], 2), []);
+});
+
+test('combina relevancia y diversidad para no llenar el mapa con frases casi iguales', () => {
+  const sentences = ['La investigación identifica el problema central del proyecto.', 'El problema central aparece de nuevo con una explicación muy parecida.', 'La solución propone una estructura visual para organizar las fuentes.'];
+  const vectors = [[1, 0], [.99, .01], [0, 1]];
+  assert.deepEqual(selectEnsembleSentences(sentences, [.98, .97, .8], vectors, 2), [sentences[0], sentences[2]]);
 });
