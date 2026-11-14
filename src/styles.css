@@ -1160,3 +1160,11 @@ kbd { padding: 2px 4px; border: 1px solid #dcdad2; border-radius: 3px; color: #8
 .linked-block-badge { display: inline-block; margin-top: 5px; color: #7d6bb0; font: 500 9px 'DM Mono', monospace; font-style: normal; }
 .install-app-button { white-space: nowrap; }
 @media (max-width: 600px) { .page-intro { display: flex; flex-direction: column; align-items: flex-start; gap: 14px; } }
+.ecosystem-strip { display: flex; align-items: center; gap: 6px; min-height: 38px; padding: 5px max(18px, calc((100vw - 1160px) / 2)); border-bottom: 1px solid var(--line); color: #9a978e; background: rgba(250,249,245,.9); overflow-x: auto; }
+.ecosystem-strip span { flex: 0 0 auto; padding: 6px 10px; border-radius: 6px; font: 500 10px 'DM Mono', monospace; letter-spacing: .02em; }
+.ecosystem-strip span.is-active { color: #5d5a52; background: #ebe8e0; }
+@media (max-width: 720px) { .ecosystem-strip { padding-left: 12px; padding-right: 12px; } .ecosystem-strip span { padding: 7px 9px; } }
+.ecosystem-strip { display: flex; align-items: center; gap: 6px; min-height: 38px; padding: 5px max(18px, calc((100vw - 1160px) / 2)); border-bottom: 1px solid var(--line); color: #9a978e; background: rgba(250,249,245,.9); overflow-x: auto; }
+.ecosystem-strip span { flex: 0 0 auto; padding: 6px 10px; border-radius: 6px; font: 500 10px 'DM Mono', monospace; letter-spacing: .02em; }
+.ecosystem-strip span.is-active { color: #5d5a52; background: #ebe8e0; }
+@media (max-width: 720px) { .ecosystem-strip { padding-left: 12px; padding-right: 12px; } .ecosystem-strip span { padding: 7px 9px; } }
