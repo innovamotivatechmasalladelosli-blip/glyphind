@@ -10,3 +10,5 @@ await rm('assets', { recursive: true, force: true });
 await cp('dist/assets', 'assets', { recursive: true });
 await copyFile('dist/manifest.webmanifest', 'manifest.webmanifest');
 await copyFile('dist/sw.js', 'sw.js');
+await copyFile('public/glyphind-icon-192.png', 'glyphind-icon-192.png');
+await copyFile('public/glyphind-icon-512.png', 'glyphind-icon-512.png');
