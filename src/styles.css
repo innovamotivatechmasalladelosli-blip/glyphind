@@ -1158,3 +1158,5 @@ kbd { padding: 2px 4px; border: 1px solid #dcdad2; border-radius: 3px; color: #8
 @media (max-width: 720px) { .document-pages-bar { margin-top: 12px; } .document-page-tabs button { min-width: 94px; padding: 9px 8px; } .document-page-controls { flex-wrap: wrap; } .document-page-controls input { flex-basis: 100%; } .document-page-controls button { flex: 1; min-height: 38px; } }
 .linked-block-help { margin: -2px 0 10px; color: #8f8c83; font-size: 10px; line-height: 1.45; }
 .linked-block-badge { display: inline-block; margin-top: 5px; color: #7d6bb0; font: 500 9px 'DM Mono', monospace; font-style: normal; }
+.install-app-button { white-space: nowrap; }
+@media (max-width: 600px) { .page-intro { display: flex; flex-direction: column; align-items: flex-start; gap: 14px; } }
