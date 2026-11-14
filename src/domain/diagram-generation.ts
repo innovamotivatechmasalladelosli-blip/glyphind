@@ -98,6 +98,16 @@ export function populateProjectFromAnalysis(project: Project, analysis: LocalAna
   nodes.forEach((node, index) => {
     node.evidenceId = sources[index]?.id;
   });
+  const factsMarkdown = facts.map((fact, index) => `## ${index + 1}. ${labelFromSentence(fact)}\n\n${fact}`).join('\n\n');
+  const data = project.type === 'document'
+    ? { ...project.data, document: `# ${rootTitle}\n\n${analysis.summary || 'Investigación local preparada para ampliar.'}\n\n${factsMarkdown}` }
+    : project.type === 'presentation'
+      ? { ...project.data, slides: facts.slice(0, 10).map((fact, index) => ({ id: createLocalId('slide'), title: labelFromSentence(fact), body: fact })) }
+      : project.type === 'board'
+        ? { ...project.data, board: [{ id: createLocalId('column'), title: 'Preguntas', cards: facts.slice(0, 3).map((fact) => ({ id: createLocalId('card'), title: labelFromSentence(fact), detail: fact })) }, { id: createLocalId('column'), title: 'Hallazgos', cards: facts.slice(3, 6).map((fact) => ({ id: createLocalId('card'), title: labelFromSentence(fact), detail: fact })) }, { id: createLocalId('column'), title: 'Siguientes pasos', cards: facts.slice(6, 8).map((fact) => ({ id: createLocalId('card'), title: labelFromSentence(fact), detail: fact })) }] }
+        : project.type === 'timeline'
+          ? { ...project.data, timeline: facts.slice(0, 8).map((fact, index) => ({ id: createLocalId('phase'), title: labelFromSentence(fact), date: `Fase ${index + 1}`, detail: fact })) }
+          : project.data;
   return {
     ...project,
     updated: Date.now(),
@@ -106,5 +116,6 @@ export function populateProjectFromAnalysis(project: Project, analysis: LocalAna
     groups: [],
     sources,
     pages: [{ id: createLocalId('page'), title: 'Ideas extraídas', nodeIds: nodes.map((node) => node.id), edgeIds: edges.map((edge) => edge.id) }],
+    ...(data ? { data } : {}),
   };
 }

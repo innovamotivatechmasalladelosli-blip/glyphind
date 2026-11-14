@@ -478,6 +478,11 @@ function downloadWorkspace(projects: Project[]) {
 }
 
 
+function researchBriefFor(topic: string) {
+  const cleanTopic = topic.trim() || 'Tema de investigación';
+  return `<h1>${cleanTopic}</h1><h2>Pregunta central</h2><p>¿Qué necesito comprender, comprobar o decidir sobre ${cleanTopic}?</p><h2>Contexto por investigar</h2><p>Identifica conceptos, antecedentes, actores, fechas y definiciones relacionadas con este tema.</p><h2>Preguntas abiertas</h2><p>¿Qué evidencia falta? ¿Qué puntos de vista deben compararse? ¿Qué datos podrían cambiar la conclusión?</p><h2>Siguientes pasos</h2><p>Reunir fuentes opcionales, contrastar hallazgos y convertir la información validada en una estructura editable.</p>`;
+}
+
 function App() {
   const [projects, setProjects] = useState<Project[]>(() => {
     try {
@@ -501,6 +506,7 @@ function App() {
   const [localTemplates, setLocalTemplates] = useState<LocalTemplate[]>(() => readLocalTemplates(localStorage));
   const [formatPlugins, setFormatPlugins] = useState<FormatPlugin[]>(() => readFormatPlugins());
   const [showAiBuilder, setShowAiBuilder] = useState(false);
+  const [aiBuilderQuestion, setAiBuilderQuestion] = useState('');
   const [aiBuilderText, setAiBuilderText] = useState('');
   const [aiBuilderUrl, setAiBuilderUrl] = useState('');
   const [aiBuilderName, setAiBuilderName] = useState('');
@@ -708,6 +714,7 @@ function App() {
   };
 
   const openAiBuilder = () => {
+    setAiBuilderQuestion('');
     setAiBuilderText('');
     setAiBuilderUrl('');
     setAiBuilderName('');
@@ -723,14 +730,17 @@ function App() {
   const buildDiagramFromText = async (useProxy = false) => {
     if (aiBuilderBusy) return;
     let raw = aiBuilderText.trim();
-    const sourceUrl = useProxy ? proxyPromptUrl.trim() : aiBuilderUrl.trim();
+    const sourceUrls = (useProxy ? proxyPromptUrl : aiBuilderUrl).split(/[\s,]+/).map((url) => url.trim()).filter(Boolean).slice(0, 8);
+    const sourceUrl = sourceUrls[0] ?? '';
     setAiBuilderBusy(true);
     setAiBuilderError('');
     setAiBuilderProgress(aiBuilderMode === 'model' ? { stage: 'starting' } : null);
     try {
-      if (sourceUrl) {
-        const parsed = new URL(sourceUrl);
-        if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('La URL debe empezar con http:// o https://.');
+      if (sourceUrls.length) {
+        sourceUrls.forEach((url) => {
+          const parsed = new URL(url);
+          if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Las fuentes deben empezar con http:// o https://.');
+        });
         setAiBuilderProgress({ stage: 'fetching' });
         if (useProxy) {
           raw = await readTextViaUrlProxy(sourceUrl);
@@ -739,7 +749,11 @@ function App() {
         } else {
           const controller = new AbortController();
           const timeout = window.setTimeout(() => controller.abort(), 20_000);
-          try { raw = await readBoundedTextResponse(await fetch(sourceUrl, { signal: controller.signal }), MAX_WEB_SOURCE_BYTES); }
+          const documents: string[] = [];
+          try {
+            for (const url of sourceUrls) documents.push(await readBoundedTextResponse(await fetch(url, { signal: controller.signal }), MAX_WEB_SOURCE_BYTES));
+            raw = documents.map((document, index) => `<h1>Fuente ${index + 1}</h1>${document}`).join('\n');
+          }
           catch (error) {
             if (error instanceof DOMException && error.name === 'AbortError') throw new Error('La página tardó más de 20 segundos. Pega el texto o inténtalo otra vez.');
             if (error instanceof TypeError || (error instanceof Error && error.message.includes('Failed to fetch'))) {
@@ -751,10 +765,11 @@ function App() {
           } finally { window.clearTimeout(timeout); }
         }
       }
+      if (!raw) raw = researchBriefFor(aiBuilderQuestion || aiBuilderName || 'Tema de investigación');
       if (new TextEncoder().encode(raw).byteLength > MAX_WEB_SOURCE_BYTES) throw new Error('El texto supera 1 MB. Divide el material en partes para mantener el análisis en el dispositivo.');
-      if (raw.length < 24) throw new Error('Pega una frase completa o agrega una URL compatible para poder crear tarjetas.');
+      if (raw.length < 24) throw new Error('Escribe una pregunta o tema, o agrega fuentes opcionales para iniciar la investigación.');
       setAiBuilderProgress(aiBuilderMode === 'model' ? { stage: 'starting' } : null);
-      const analysis = await analyzeLocally(raw, sourceUrl || undefined, aiBuilderMode, setAiBuilderProgress);
+      const analysis = await analyzeLocally(raw, sourceUrls.join('\n') || undefined, aiBuilderMode, setAiBuilderProgress);
       const title = aiBuilderName.trim() || (analysis.title !== 'Información extraída' ? analysis.title : 'Ideas desde texto');
       const seed = createProject(title, aiBuilderType);
       const project = populateProjectFromAnalysis(seed, analysis, sourceUrl || undefined);
@@ -767,8 +782,8 @@ function App() {
       setProxyPromptUrl('');
       setProxyPromptOpen(false);
       openProject(project);
-      const fallback = analysis.modelError ? ' (se usó extracción local de respaldo)' : '';
-      setToast(`Diagrama creado con ${project.nodes.length - 1} hallazgos y fuentes rastreables${fallback}`);
+      const fallback = analysis.modelError ? ' · respaldo local' : '';
+      setToast(`${typeFor(aiBuilderType).label} creado con ${project.nodes.length - 1} hallazgos${sourceUrls.length ? ` · ${sourceUrls.length} fuente${sourceUrls.length === 1 ? '' : 's'}` : ' · investigación guiada'}${fallback}`);
     } catch (error) {
       setAiBuilderError(error instanceof Error ? error.message : 'No se pudo crear el diagrama. Revisa el texto e inténtalo otra vez.');
     } finally {
@@ -971,7 +986,7 @@ function App() {
       </main>
 
       {modal && <ProjectModal mode={modal} name={draftName} type={draftType} setName={setDraftName} setType={setDraftType} onSubmit={submitProject} onClose={() => setModal(null)} />}
-      {showAiBuilder && <AiBuilderModal name={aiBuilderName} setName={setAiBuilderName} type={aiBuilderType} setType={setAiBuilderType} text={aiBuilderText} setText={setAiBuilderText} url={aiBuilderUrl} setUrl={(value) => { setAiBuilderUrl(value); setProxyPromptUrl(''); setProxyPromptOpen(false); setAiBuilderError(''); }} mode={aiBuilderMode} setMode={setAiBuilderMode} busy={aiBuilderBusy} progress={aiBuilderProgress} error={aiBuilderError} proxyAvailable={Boolean(proxyPromptUrl && !proxyPromptOpen)} onOpenProxyConsent={() => setProxyPromptOpen(true)} onSubmit={createDiagramFromText} onClose={() => { if (!aiBuilderBusy) setShowAiBuilder(false); }} />}
+      {showAiBuilder && <AiBuilderModal question={aiBuilderQuestion} setQuestion={setAiBuilderQuestion} name={aiBuilderName} setName={setAiBuilderName} type={aiBuilderType} setType={setAiBuilderType} text={aiBuilderText} setText={setAiBuilderText} url={aiBuilderUrl} setUrl={(value) => { setAiBuilderUrl(value); setProxyPromptUrl(''); setProxyPromptOpen(false); setAiBuilderError(''); }} mode={aiBuilderMode} setMode={setAiBuilderMode} busy={aiBuilderBusy} progress={aiBuilderProgress} error={aiBuilderError} proxyAvailable={Boolean(proxyPromptUrl && !proxyPromptOpen)} onOpenProxyConsent={() => setProxyPromptOpen(true)} onSubmit={createDiagramFromText} onClose={() => { if (!aiBuilderBusy) setShowAiBuilder(false); }} />}
       {showAiBuilder && proxyPromptUrl && proxyPromptOpen && !aiBuilderBusy && <UrlProxyConsent url={proxyPromptUrl} busy={aiBuilderBusy} error={aiBuilderError} onCancel={() => setProxyPromptOpen(false)} onConfirm={confirmProxyRead} />}
       {toast && <div className="toast" role="status" aria-live="polite"><span className="toast-check">✓</span>{toast}</div>}
     </div>
@@ -1554,7 +1569,9 @@ function Editor({ project, allProjects, onBack, onChange, onToast, onTemplatesCh
 createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>);
 
 
-function AiBuilderModal({ name, setName, type, setType, text, setText, url, setUrl, mode, setMode, busy, progress, error, proxyAvailable, onOpenProxyConsent, onSubmit, onClose }: {
+function AiBuilderModal({ question, setQuestion, name, setName, type, setType, text, setText, url, setUrl, mode, setMode, busy, progress, error, proxyAvailable, onOpenProxyConsent, onSubmit, onClose }: {
+  question: string;
+  setQuestion: (value: string) => void;
   name: string;
   setName: (value: string) => void;
   type: string;
@@ -1585,20 +1602,21 @@ function AiBuilderModal({ name, setName, type, setType, text, setText, url, setU
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target && !busy) onClose(); }}>
       <form className="project-modal ai-builder-modal" onSubmit={onSubmit} aria-labelledby="ai-builder-title">
-        <div className="modal-head"><div><span className="section-kicker">De texto a mapa · en tu dispositivo</span><h2 id="ai-builder-title">Pega tus ideas. Sal con un diagrama.</h2><p className="ai-builder-intro">Glyphind separa frases de la fuente y las convierte en tarjetas editables con conectores y referencias.</p></div><button type="button" className="icon-button" onClick={onClose} disabled={busy} aria-label="Cerrar generador"><Icon name="close" /></button></div>
-        <label className="field-label">URL pública opcional<input type="url" value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://sitio.com/artículo" /></label>
-        <label className="field-label">Texto o contenido para organizar<textarea className="ai-builder-source" autoFocus value={text} onChange={(event) => setText(event.target.value)} rows={8} maxLength={1_000_000} placeholder="Pega aquí un artículo, apuntes o una explicación…\n\nEjemplo: El equipo recibe solicitudes. Primero revisa el objetivo y el plazo. Después asigna una persona responsable y confirma el resultado." /></label>
+        <div className="modal-head"><div><span className="section-kicker">Investigación y creación · en tu dispositivo</span><h2 id="ai-builder-title">Escribe un tema y deja que Glyphind lo organice.</h2><p className="ai-builder-intro">Puedes iniciar solo con una pregunta, pegar contenido o controlar la investigación con fuentes opcionales.</p></div><button type="button" className="icon-button" onClick={onClose} disabled={busy} aria-label="Cerrar generador"><Icon name="close" /></button></div>
+        <label className="field-label">Tema o pregunta de investigación<input autoFocus value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Ejemplo: ¿Cómo mejorar la educación digital?" /></label>
+        <label className="field-label">Fuentes opcionales (una URL por línea)<textarea value={url} onChange={(event) => setUrl(event.target.value)} rows={3} placeholder="Puedes dejarlo vacío o agregar hasta 8 sitios web" /></label>
+        <label className="field-label">Contenido adicional opcional<textarea className="ai-builder-source" value={text} onChange={(event) => setText(event.target.value)} rows={6} maxLength={1_000_000} placeholder="Pega aquí artículos, apuntes o una explicación para complementar la investigación." /></label>
         <div className="ai-builder-meta"><span>{text.length.toLocaleString('es-MX')} caracteres</span><span>Las frases originales quedan como detalle y fuente de cada tarjeta.</span></div>
         <div className="ai-builder-fields">
           <label className="field-label">Nombre del proyecto<input value={name} onChange={(event) => setName(event.target.value)} placeholder="Se toma del título si lo dejas vacío" /></label>
-          <label className="field-label">Cómo organizarlo<select value={type} onChange={(event) => setType(event.target.value)}><option value="mindmap">Mapa mental · ideas alrededor del tema</option><option value="concept">Mapa conceptual · conceptos y relaciones</option><option value="flow">Flujo · conserva el orden del texto</option></select></label>
+          <label className="field-label">Qué quieres crear<select value={type} onChange={(event) => setType(event.target.value)}><option value="mindmap">Mapa mental</option><option value="concept">Mapa conceptual</option><option value="flow">Flujo de trabajo</option><option value="document">Documento estructurado</option><option value="presentation">Presentación</option><option value="board">Tablero de acciones</option><option value="timeline">Cronograma</option><option value="matrix">Matriz comparativa</option><option value="cycle">Ciclo de mejora</option><option value="venn">Comparación de conjuntos</option></select></label>
         </div>
         <label className="field-label">Motor local<select value={mode} onChange={(event) => setMode(event.target.value as LocalAnalysisMode)}><option value="model">IA semántica local · recomendado</option><option value="rules">Extracción offline · sin descarga</option></select></label>
-        <div className="ai-builder-privacy"><Icon name="save" size={15} /><span><strong>Local por defecto.</strong> El texto pegado se analiza en este dispositivo y no consume créditos de API. Primero se intenta leer la URL directamente. Si CORS lo impide, puedes elegir enviar sólo esa URL al proxy de Cloudflare; cada intento requiere tu permiso y el análisis semántico sigue aquí. No uses enlaces con tokens o datos de acceso.</span></div>
+        <div className="ai-builder-privacy"><Icon name="save" size={15} /><span><strong>Sin fuentes también funciona.</strong> Sin URLs crea una investigación guiada con preguntas, contexto y siguientes pasos; con URLs opcionales contrasta el contenido que autorices. El análisis semántico y la estructura se ejecutan localmente. No usa datos externos inventados ni requiere claves.</span></div>
         {error && <p className="ai-builder-error" role="alert">{error}</p>}
         {proxyAvailable && <div className="ai-builder-proxy-cta"><span>¿Quieres intentar con la URL sin volver a consultarla directamente?</span><button type="button" className="secondary-button" onClick={onOpenProxyConsent}>Autorizar una lectura</button></div>}
         {busy && <p className="ai-builder-progress" role="status" aria-live="polite">{progressText}</p>}
-        <div className="modal-foot"><span>Podrás editar, deshacer y exportar PNG después.</span><div><button type="button" className="secondary-button" onClick={onClose} disabled={busy}>Cancelar</button><button type="submit" className="primary-button" disabled={busy || (text.trim().length < 24 && !url.trim())}><Icon name="spark" size={15} /> {busy ? 'Organizando…' : 'Crear diagrama'}</button></div></div>
+        <div className="modal-foot"><span>Podrás editar, deshacer y exportar el resultado después.</span><div><button type="button" className="secondary-button" onClick={onClose} disabled={busy}>Cancelar</button><button type="submit" className="primary-button" disabled={busy || (!question.trim() && !text.trim() && !url.trim())}><Icon name="spark" size={15} /> {busy ? 'Investigando…' : 'Investigar y crear'}</button></div></div>
       </form>
     </div>
   );
