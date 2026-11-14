@@ -3,5 +3,6 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig(({ command }) => ({
   plugins: [react()],
+  server: { allowedHosts: true },
   base: command === 'build' ? '/glyphind/' : '/',
 }));

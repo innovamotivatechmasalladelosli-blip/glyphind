@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type MouseEvent as ReactMouseEvent } from 'react';
+import { Component, StrictMode, useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type ErrorInfo, type FormEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { analyzeLocally, localAiModes } from './ai/localAi';
 import { populateProjectFromAnalysis } from './domain/diagram-generation';
@@ -1249,7 +1249,18 @@ function TimelineEditor({ project, onBack, onChange, onToast }: { project: Proje
 }
 
 
-function Editor({ project, allProjects, onBack, onChange, onToast, onTemplatesChange, onCreateDerived }: { project: Project; allProjects: Project[]; onBack: () => void; onChange: (project: Project) => void; onToast: (message: string) => void; onTemplatesChange: (templates: LocalTemplate[]) => void; onCreateDerived: (source: Project, targetType: 'document' | 'presentation') => void }) {
+type EditorProps = { project: Project; allProjects: Project[]; onBack: () => void; onChange: (project: Project) => void; onToast: (message: string) => void; onTemplatesChange: (templates: LocalTemplate[]) => void; onCreateDerived: (source: Project, targetType: 'document' | 'presentation') => void };
+
+function Editor({ project, allProjects, onBack, onChange, onToast, onTemplatesChange, onCreateDerived }: EditorProps) {
+  if (project.type === 'document') return <DocumentEditor project={project} onBack={onBack} onChange={onChange} onToast={onToast} onCreateDerived={onCreateDerived} />;
+  if (project.type === 'presentation') return <PresentationEditor project={project} allProjects={allProjects} onBack={onBack} onChange={onChange} onToast={onToast} />;
+  if (project.type === 'board') return <BoardEditor project={project} onBack={onBack} onChange={onChange} onToast={onToast} />;
+  if (project.type === 'timeline') return <TimelineEditor project={project} onBack={onBack} onChange={onChange} onToast={onToast} />;
+  if (project.type === 'matrix' || project.type === 'cycle' || project.type === 'venn') return <SemanticDiagramEditor project={project} onBack={onBack} onChange={onChange} onToast={onToast} exportMenu={<ExportMenu project={project} onExport={(format) => { downloadProject(project, format); onToast('Proyecto descargado'); }} />} />;
+  return <CanvasEditor project={project} allProjects={allProjects} onBack={onBack} onChange={onChange} onToast={onToast} onTemplatesChange={onTemplatesChange} onCreateDerived={onCreateDerived} />;
+}
+
+function CanvasEditor({ project, allProjects, onBack, onChange, onToast, onTemplatesChange, onCreateDerived }: EditorProps) {
   const [selectedNodeId, setSelectedNodeId] = useState('');
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [outlineOpen, setOutlineOpen] = useState(false);
@@ -1338,11 +1349,6 @@ function Editor({ project, allProjects, onBack, onChange, onToast, onTemplatesCh
   const type = typeFor(project.type);
   const selectedNode = project.nodes.find((node) => node.id === selectedNodeId);
 
-  if (project.type === 'document') return <><DocumentEditor project={project} onBack={onBack} onChange={changeProject} onToast={onToast} onCreateDerived={onCreateDerived} /><HistoryDock canUndo={historyRef.current.past.length > 0} canRedo={historyRef.current.future.length > 0} undo={undo} redo={redo} operations={project.history ?? []} /></>;
-  if (project.type === 'presentation') return <><PresentationEditor project={project} allProjects={allProjects} onBack={onBack} onChange={changeProject} onToast={onToast} /><HistoryDock canUndo={historyRef.current.past.length > 0} canRedo={historyRef.current.future.length > 0} undo={undo} redo={redo} operations={project.history ?? []} /></>;
-  if (project.type === 'board') return <><BoardEditor project={project} onBack={onBack} onChange={changeProject} onToast={onToast} /><HistoryDock canUndo={historyRef.current.past.length > 0} canRedo={historyRef.current.future.length > 0} undo={undo} redo={redo} operations={project.history ?? []} /></>;
-  if (project.type === 'timeline') return <><TimelineEditor project={project} onBack={onBack} onChange={changeProject} onToast={onToast} /><HistoryDock canUndo={historyRef.current.past.length > 0} canRedo={historyRef.current.future.length > 0} undo={undo} redo={redo} operations={project.history ?? []} /></>;
-  if (project.type === 'matrix' || project.type === 'cycle' || project.type === 'venn') return <><SemanticDiagramEditor project={project} onBack={onBack} onChange={changeProject} onToast={onToast} exportMenu={<ExportMenu project={project} onExport={(format) => { downloadProject(project, format); onToast('Proyecto descargado'); }} />} /><HistoryDock canUndo={historyRef.current.past.length > 0} canRedo={historyRef.current.future.length > 0} undo={undo} redo={redo} operations={project.history ?? []} /></>;
 
   const updateNode = (patch: Partial<DiagramNode>) => {
     if (!selectedNode) return;
@@ -1581,7 +1587,17 @@ function Editor({ project, allProjects, onBack, onChange, onToast, onTemplatesCh
   );
 }
 
-createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>);
+type AppErrorBoundaryState = { error: Error | null };
+class AppErrorBoundary extends Component<{ children: ReactNode }, AppErrorBoundaryState> {
+  state: AppErrorBoundaryState = { error: null };
+  static getDerivedStateFromError(error: Error): AppErrorBoundaryState { return { error }; }
+  componentDidCatch(error: Error, info: ErrorInfo) { console.error('Glyphind render error', error, info.componentStack); }
+  render() {
+    if (!this.state.error) return this.props.children;
+    return <main className="app-error-screen"><div className="app-error-card"><span className="section-kicker">Recuperación de Glyphind</span><h1>No se pudo mostrar esta sección</h1><p>El proyecto sigue guardado localmente. Puedes intentar renderizarlo otra vez sin perder tu trabajo.</p><code>{this.state.error.message || 'Error de renderizado'}</code><div><button className="primary-button" onClick={() => this.setState({ error: null })}>Intentar de nuevo</button><button className="secondary-button" onClick={() => window.location.reload()}>Recargar app</button></div></div></main>;
+  }
+}
+createRoot(document.getElementById('root')!).render(<AppErrorBoundary><StrictMode><App /></StrictMode></AppErrorBoundary>);
 
 
 function InstallHelpModal({ onClose }: { onClose: () => void }) {
